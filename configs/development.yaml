@@ -1,0 +1,58 @@
+platform:
+  environment: development
+
+http:
+  cors_origins:
+    - http://localhost:5173
+    - http://127.0.0.1:5173
+    - http://localhost:8000
+    - http://127.0.0.1:8000
+    - http://localhost:17800
+    - http://127.0.0.1:17800
+
+ocr:
+  enabled: false
+
+queue:
+  provider: asyncio
+
+storage:
+  provider: local_fs
+  bucket: data/objects
+  endpoint_url: null
+  access_key: null
+  secret_key: null
+
+llm:
+  provider: ollama
+  model: llama3.2
+  temperature: 0.3
+  max_tokens: 1200
+  api_base: http://127.0.0.1:11434
+
+embedding:
+  provider: ollama
+  model: nomic-embed-text
+  dimensions: 768
+
+reranker:
+  provider: identity
+  top_k: 8
+
+retrieval:
+  strategy: hybrid
+  top_k: 12
+
+observability:
+  log_level: DEBUG
+
+ai_catalog:
+  llm:
+    - provider: ollama
+      model: llama3.2
+    - provider: ollama
+      model: llama3.1
+    - provider: extractive
+      model: extractive
+    - provider: openai
+      model: gpt-4o-mini

@@ -1,0 +1,10 @@
+ACME LEAVE POLICY
+=================
+
+Parental leave: 16 weeks paid for the primary caregiver, 6 weeks paid for the secondary caregiver. Leave must start within 12 months of birth or adoption.
+
+Bereavement: 5 paid days for immediate family.
+
+Jury duty: paid for the duration of service, with a court summons on file.
+
+Who to notify: email leave@acme.test at least 30 days before planned parental leave.

@@ -1,0 +1,114 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+      POSTGRES_DB: rag
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ragminio
+      MINIO_ROOT_PASSWORD: ragminio_secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    environment:
+      RAG_ENV: development
+      RAG_CONFIG_DIR: /configs
+      DATABASE_URL: postgresql+asyncpg://rag:rag@postgres:5432/rag
+      DATABASE_URL_SYNC: postgresql+psycopg://rag:rag@postgres:5432/rag
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: ragminio
+      S3_SECRET_KEY: ragminio_secret
+      S3_BUCKET: rag-documents
+      S3_REGION: us-east-1
+      JWT_SECRET: local-dev-only-not-for-production
+      OLLAMA_BASE_URL: http://ollama:11434
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../configs:/configs:ro
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    command: python -m app.workers.main
+    environment:
+      RAG_ENV: development
+      RAG_CONFIG_DIR: /configs
+      DATABASE_URL: postgresql+asyncpg://rag:rag@postgres:5432/rag
+      DATABASE_URL_SYNC: postgresql+psycopg://rag:rag@postgres:5432/rag
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: ragminio
+      S3_SECRET_KEY: ragminio_secret
+      S3_BUCKET: rag-documents
+      S3_REGION: us-east-1
+      JWT_SECRET: local-dev-only-not-for-production
+      OLLAMA_BASE_URL: http://ollama:11434
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../configs:/configs:ro
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  minio_data:
+  ollama_data:

@@ -1,0 +1,105 @@
+platform:
+  name: rag-platform
+  environment: base
+
+llm:
+  provider: ollama
+  model: llama3.1
+  temperature: 0.1
+  max_tokens: 4000
+  api_base: secret://env/OLLAMA_BASE_URL
+
+embedding:
+  provider: ollama
+  model: nomic-embed-text
+  dimensions: 768
+
+parser:
+  provider: builtin
+
+chunking:
+  strategy: recursive
+  chunk_size: 800
+  chunk_overlap: 120
+
+retrieval:
+  strategy: hybrid
+  top_k: 20
+  dense:
+    top_k: 20
+  sparse:
+    top_k: 20
+  fusion:
+    method: rrf
+
+reranker:
+  provider: identity
+  top_k: 8
+
+vector_store:
+  provider: pgvector
+  collection: documents
+
+sparse_index:
+  provider: postgres_fts
+
+database:
+  provider: postgres
+  url: secret://env/DATABASE_URL
+
+storage:
+  provider: s3
+  bucket: rag-documents
+  region: us-east-1
+  endpoint_url: secret://env/S3_ENDPOINT_URL
+  access_key: secret://env/S3_ACCESS_KEY
+  secret_key: secret://env/S3_SECRET_KEY
+
+redis:
+  url: secret://env/REDIS_URL
+
+ocr:
+  enabled: false
+  provider: tesseract
+
+conversation:
+  enabled: true
+  max_history_messages: 20
+
+generation:
+  require_citations: true
+  refuse_without_evidence: true
+  minimum_relevance_score: 0.72
+  refusal_message: "I couldn't find enough information in the available documents to answer that reliably."
+
+memory:
+  enabled: false
+  provider: postgres
+
+privacy:
+  store_raw_documents: true
+  store_queries: true
+  store_llm_prompts: false
+  store_llm_responses: true
+  redact_pii: false
+
+limits:
+  monthly_budget_usd: null
+  max_tokens_per_request: 10000
+
+model_routing:
+  enabled: false
+  routes: {}
+
+auth:
+  provider: password
+  jwt_secret: secret://env/JWT_SECRET
+  access_ttl_seconds: 900
+  refresh_ttl_seconds: 1209600
+
+queue:
+  provider: taskiq_redis
+
+observability:
+  log_level: INFO
+  otel_enabled: false

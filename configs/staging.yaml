@@ -1,0 +1,6 @@
+platform:
+  environment: staging
+
+observability:
+  log_level: INFO
+  otel_enabled: true

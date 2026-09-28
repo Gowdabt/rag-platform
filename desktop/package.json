@@ -1,0 +1,63 @@
+{
+  "name": "rag-platform-desktop",
+  "productName": "RAG Platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native Mac and Windows shell for the local RAG platform",
+  "main": "main.cjs",
+  "author": "RAG Platform",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --mac --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "app.ragplatform.desktop",
+    "productName": "RAG Platform",
+    "copyright": "Copyright © RAG Platform",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "splash.html",
+      "icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../frontend/dist",
+        "to": "frontend/dist"
+      },
+      {
+        "from": "../backend/app",
+        "to": "backend/app"
+      },
+      {
+        "from": "../configs",
+        "to": "configs"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"],
+      "icon": "icon.png",
+      "hardenedRuntime": false
+    },
+    "win": {
+      "target": ["nsis"],
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "RAG Platform"
+    }
+  }
+}

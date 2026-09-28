@@ -1,0 +1,32 @@
+---
+description: Commit once and push to both GitHub and gitcore remotes; keep both repositories private
+alwaysApply: true
+---
+
+# Dual git remotes (GitHub + gitcore)
+
+This repo is mirrored on **two private remotes**. When the user asks to commit and/or push:
+
+1. Create **one** local commit (do not skip hooks; do not commit `.env` or secrets).
+2. Push that commit to **both** remotes. Never GitHub-only or gitcore-only unless the user explicitly says so.
+3. Do not force-push. Do not make either remote public.
+
+## Remotes
+
+| Name | Host | URL | Visibility |
+| --- | --- | --- | --- |
+| `github` | github.com | https://github.com/Gowdabt/rag-platform | **private** |
+| `soma` | git.soma.salesforce.com | https://git.soma.salesforce.com/hbt/rag-platform | **private** |
+| `all` | both push URLs | `git push all <branch>` | **private** |
+
+GitHub CLI (`gh`) is for **github.com / Gowdabt** only. Salesforce uses git-soma / `GH_HOST=git.soma.salesforce.com` for `hbt/rag-platform`. Do not use github.com `gh` against Salesforce. gitcore.soma.salesforce.com forbids user-account repos (do not publish this personal project into Core orgs).
+
+## Commands
+
+```bash
+git push github main
+git push soma main
+git push all main
+```
+
+Use the existing default branch (`main`). Keep both remotes private (`gh repo edit --visibility private` on GitHub if it ever becomes public).

@@ -1,0 +1,267 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Calm Enterprise Retrieval — extracted from Google Stitch project
+  https://stitch.withgoogle.com/projects/13544640139240374250
+  Tokens: designTheme.namedColors + designMd typography/spacing/shape.
+*/
+
+:root {
+  --color-surface-container-lowest: #ffffff;
+  --color-tertiary-fixed: #85f8c4;
+  --color-surface-tint: #565e74;
+  --color-surface-dim: #cbdbf5;
+  --color-error-container: #ffdad6;
+  --color-inverse-primary: #bec6e0;
+  --color-on-tertiary: #ffffff;
+  --color-background: #f8f9ff;
+  --color-on-tertiary-fixed: #002114;
+  --color-inverse-surface: #213145;
+  --color-primary-container: #131b2e;
+  --color-secondary-container: #d5e3fc;
+  --color-primary-fixed-dim: #bec6e0;
+  --color-on-error-container: #93000a;
+  --color-on-surface: #0b1c30;
+  --color-on-secondary-container: #57657a;
+  --color-on-tertiary-fixed-variant: #005137;
+  --color-tertiary: #000000;
+  --color-on-secondary: #ffffff;
+  --color-error: #ba1a1a;
+  --color-tertiary-container: #002114;
+  --color-outline: #76777d;
+  --color-inverse-on-surface: #eaf1ff;
+  --color-surface-container-low: #eff4ff;
+  --color-on-primary-fixed-variant: #3f465c;
+  --color-on-primary: #ffffff;
+  --color-tertiary-fixed-dim: #68dba9;
+  --color-on-surface-variant: #45464d;
+  --color-on-secondary-fixed-variant: #3a485b;
+  --color-surface: #f8f9ff;
+  --color-primary: #000000;
+  --color-surface-bright: #f8f9ff;
+  --color-surface-container-high: #dce9ff;
+  --color-surface-container: #e5eeff;
+  --color-surface-container-highest: #d3e4fe;
+  --color-on-primary-fixed: #131b2e;
+  --color-on-tertiary-container: #069669;
+  --color-primary-fixed: #dae2fd;
+  --color-on-error: #ffffff;
+  --color-on-primary-container: #7c839b;
+  --color-outline-variant: #c6c6cd;
+  --color-secondary-fixed: #d5e3fc;
+  --color-on-background: #0b1c30;
+  --color-surface-variant: #d3e4fe;
+  --color-secondary: #515f74;
+  --color-secondary-fixed-dim: #b9c7df;
+  --color-on-secondary-fixed: #0d1c2e;
+  --color-success: #069669;
+  --color-ink: #0f172a;
+  --color-healthy-bg: #d1fae5;
+  --color-healthy-fg: #065f46;
+  --color-warning-bg: #fef3c7;
+  --color-warning-fg: #92400e;
+  --color-failed-bg: #fee2e2;
+  --color-failed-fg: #991b1b;
+  --color-mark: #fef08a;
+  --color-mark-fg: #854d0e;
+  --color-overlay: rgba(15, 23, 42, 0.35);
+
+  --rgb-background: 248 249 255;
+  --rgb-surface: 248 249 255;
+  --rgb-surface-lowest: 255 255 255;
+  --rgb-surface-low: 239 244 255;
+  --rgb-surface-container: 229 238 255;
+  --rgb-surface-high: 220 233 255;
+  --rgb-surface-highest: 211 228 254;
+  --rgb-surface-dim: 203 219 245;
+  --rgb-on-surface: 11 28 48;
+  --rgb-on-variant: 69 70 77;
+  --rgb-outline: 118 119 125;
+  --rgb-outline-variant: 198 198 205;
+  --rgb-primary: 0 0 0;
+  --rgb-on-primary: 255 255 255;
+  --rgb-primary-container: 19 27 46;
+  --rgb-secondary: 81 95 116;
+  --rgb-error: 186 26 26;
+  --rgb-error-container: 255 218 214;
+  --rgb-on-error-container: 147 0 10;
+  --rgb-success: 6 150 105;
+  --rgb-ink: 15 23 42;
+
+  --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --text-headline-xl: 30px;
+  --leading-headline-xl: 38px;
+  --text-headline-lg: 22px;
+  --leading-headline-lg: 28px;
+  --text-headline-md: 18px;
+  --leading-headline-md: 24px;
+  --text-headline-sm: 15px;
+  --leading-headline-sm: 20px;
+  --text-body-lg: 15px;
+  --leading-body-lg: 22px;
+  --text-body-md: 13px;
+  --leading-body-md: 18px;
+  --text-body-sm: 12px;
+  --leading-body-sm: 16px;
+  --text-label-md: 12px;
+  --leading-label-md: 16px;
+  --text-label-sm: 11px;
+  --leading-label-sm: 14px;
+
+  --radius-sm: 0.25rem;
+  --radius: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --radius-full: 9999px;
+
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 0.75rem;
+  --space-lg: 1rem;
+  --space-xl: 1.5rem;
+  --gutter: 1rem;
+  --gutter-desktop: 1.5rem;
+  --margin: 1rem;
+  --margin-desktop: 2rem;
+  --shell-max: 72rem;
+  --header-h: 3.5rem;
+
+  --shadow-rest: 0 1px 3px 0 rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+  --shadow-card: 0 1px 2px rgba(11, 28, 48, 0.06);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--color-background);
+    color: var(--color-on-surface);
+    font-family: var(--font-sans);
+    font-size: var(--text-body-md);
+    line-height: var(--leading-body-md);
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background: var(--color-primary-fixed);
+    color: var(--color-on-primary-fixed);
+  }
+}
+
+@layer components {
+  .page-kicker {
+    @apply text-[11px] font-medium uppercase tracking-[0.02em] text-on-variant;
+  }
+
+  .page-title {
+    @apply text-[22px] font-semibold leading-7 tracking-[-0.015em] text-on-surface;
+  }
+
+  .page-sub {
+    @apply mt-1 text-[13px] leading-[18px] text-on-variant;
+  }
+
+  .panel {
+    @apply overflow-hidden rounded-xl border border-outline-variant/50 bg-surface-lowest shadow-card;
+  }
+
+  .metric {
+    @apply rounded-xl border border-outline-variant/50 bg-surface-lowest px-4 py-3 shadow-card;
+  }
+
+  .metric-label {
+    @apply text-[11px] font-medium uppercase tracking-[0.02em] text-on-variant;
+  }
+
+  .metric-value {
+    @apply mt-1 text-xl font-semibold tracking-tight text-on-surface;
+  }
+
+  .btn {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-3.5 text-[12px] font-medium leading-4 transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-on-primary hover:bg-primary-container;
+  }
+
+  .btn-secondary {
+    @apply border border-outline-variant bg-surface-lowest text-on-surface hover:border-outline hover:bg-background;
+  }
+
+  .btn-ghost {
+    @apply text-secondary hover:bg-surface-low hover:text-on-surface;
+  }
+
+  .btn-danger {
+    @apply border border-error-container bg-surface-lowest text-error hover:bg-error-container/40;
+  }
+
+  .input-field {
+    @apply h-9 w-full rounded-lg border border-outline-variant/80 bg-surface-lowest px-3 text-[13px] text-on-surface shadow-sm outline-none transition placeholder:text-outline focus:border-primary focus:ring-1 focus:ring-primary;
+  }
+
+  .select-field {
+    @apply input-field;
+  }
+
+  .textarea-field {
+    @apply min-h-28 w-full rounded-lg border border-outline-variant/80 bg-surface-lowest px-3 py-2 text-[13px] leading-[18px] text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary;
+  }
+
+  .field-label {
+    @apply block text-[12px] font-medium tracking-[0.01em] text-on-surface;
+  }
+
+  .field-help {
+    @apply mt-1 block text-[12px] leading-4 text-on-variant;
+  }
+
+  .banner-error {
+    @apply flex items-start gap-2 rounded-lg bg-error-container/40 px-3 py-2.5 text-[12px] leading-4 text-on-error-container;
+  }
+
+  .banner-ok {
+    @apply rounded-lg bg-surface-low px-3 py-2.5 text-[12px] leading-[18px] text-on-surface;
+  }
+
+  .table-head {
+    @apply grid gap-3 border-b border-outline-variant/40 bg-background px-4 py-2 text-[11px] font-medium uppercase tracking-[0.02em] text-on-variant;
+  }
+
+  .table-row {
+    @apply grid items-center gap-3 border-b border-outline-variant/30 px-4 py-3 text-[13px] last:border-0 hover:bg-background;
+  }
+
+  .link-action {
+    @apply text-[12px] font-medium text-secondary hover:text-on-surface;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-outline-variant/40 bg-surface-low px-2.5 py-0.5 text-[11px] font-medium text-on-variant;
+  }
+
+  .status-dot {
+    @apply inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-success;
+  }
+}
+
+.desktop-drag {
+  -webkit-app-region: drag;
+}
+
+.desktop-no-drag {
+  -webkit-app-region: no-drag;
+}

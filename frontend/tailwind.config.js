@@ -1,0 +1,60 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./index.html", "./src/**/*.{js,ts,tsx}"],
+  theme: {
+    extend: {
+      colors: {
+        background: "rgb(var(--rgb-background) / <alpha-value>)",
+        surface: "rgb(var(--rgb-surface) / <alpha-value>)",
+        "surface-lowest": "rgb(var(--rgb-surface-lowest) / <alpha-value>)",
+        "surface-low": "rgb(var(--rgb-surface-low) / <alpha-value>)",
+        "surface-container": "rgb(var(--rgb-surface-container) / <alpha-value>)",
+        "surface-high": "rgb(var(--rgb-surface-high) / <alpha-value>)",
+        "surface-highest": "rgb(var(--rgb-surface-highest) / <alpha-value>)",
+        "surface-dim": "rgb(var(--rgb-surface-dim) / <alpha-value>)",
+        "on-surface": "rgb(var(--rgb-on-surface) / <alpha-value>)",
+        "on-variant": "rgb(var(--rgb-on-variant) / <alpha-value>)",
+        outline: "rgb(var(--rgb-outline) / <alpha-value>)",
+        "outline-variant": "rgb(var(--rgb-outline-variant) / <alpha-value>)",
+        primary: "rgb(var(--rgb-primary) / <alpha-value>)",
+        "on-primary": "rgb(var(--rgb-on-primary) / <alpha-value>)",
+        "primary-container": "rgb(var(--rgb-primary-container) / <alpha-value>)",
+        secondary: "rgb(var(--rgb-secondary) / <alpha-value>)",
+        error: "rgb(var(--rgb-error) / <alpha-value>)",
+        "error-container": "rgb(var(--rgb-error-container) / <alpha-value>)",
+        "on-error-container": "rgb(var(--rgb-on-error-container) / <alpha-value>)",
+        success: "rgb(var(--rgb-success) / <alpha-value>)",
+        ink: "rgb(var(--rgb-ink) / <alpha-value>)",
+      },
+      fontFamily: {
+        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"],
+      },
+      fontSize: {
+        "headline-xl": ["30px", { lineHeight: "38px", letterSpacing: "-0.02em", fontWeight: "600" }],
+        "headline-lg": ["22px", { lineHeight: "28px", letterSpacing: "-0.015em", fontWeight: "600" }],
+        "headline-md": ["18px", { lineHeight: "24px", letterSpacing: "-0.01em", fontWeight: "600" }],
+        "headline-sm": ["15px", { lineHeight: "20px", letterSpacing: "-0.005em", fontWeight: "600" }],
+        "body-lg": ["15px", { lineHeight: "22px", fontWeight: "400" }],
+        "body-md": ["13px", { lineHeight: "18px", fontWeight: "400" }],
+        "body-sm": ["12px", { lineHeight: "16px", fontWeight: "400" }],
+        "label-md": ["12px", { lineHeight: "16px", letterSpacing: "0.01em", fontWeight: "500" }],
+        "label-sm": ["11px", { lineHeight: "14px", letterSpacing: "0.02em", fontWeight: "500" }],
+        "code-md": ["12px", { lineHeight: "18px", fontWeight: "400" }],
+        "code-sm": ["11px", { lineHeight: "16px", fontWeight: "400" }],
+      },
+      maxWidth: {
+        shell: "72rem",
+      },
+      boxShadow: {
+        card: "0 1px 2px rgba(11, 28, 48, 0.06)",
+        rest: "0 1px 3px 0 rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.04)",
+      },
+      borderRadius: {
+        lg: "0.5rem",
+        xl: "0.75rem",
+      },
+    },
+  },
+  plugins: [],
+};

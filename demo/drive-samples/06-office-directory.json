@@ -1,0 +1,25 @@
+{
+  "company": "Acme",
+  "offices": [
+    {
+      "id": "blr",
+      "city": "Bengaluru",
+      "address": "12th Floor, Manyata Tech Park, Nagawara, Bengaluru 560045",
+      "timezone": "Asia/Kolkata",
+      "capacity": 120,
+      "badge_office": "reception desk, tower A"
+    },
+    {
+      "id": "sfo",
+      "city": "San Francisco",
+      "address": "88 Spear Street, Suite 400, San Francisco, CA 94105",
+      "timezone": "America/Los_Angeles",
+      "capacity": 40,
+      "badge_office": "lobby iPad, code 4419"
+    }
+  ],
+  "wifi": {
+    "guest_ssid": "Acme-Guest",
+    "guest_password": "welcome-acme-2026"
+  }
+}

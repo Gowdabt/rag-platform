@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>RAG Platform</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #f8f9ff;
+        color: #0b1c30;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        -webkit-app-region: drag;
+        user-select: none;
+      }
+      .wrap {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+      }
+      .mark {
+        width: 52px;
+        height: 52px;
+        border-radius: 12px;
+        background: #0b1c30;
+        color: #fff;
+        display: grid;
+        place-items: center;
+      }
+      h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      p {
+        margin: 0;
+        font-size: 13px;
+        color: #5b6475;
+      }
+      .spin {
+        width: 18px;
+        height: 18px;
+        border: 2px solid #d7dbe7;
+        border-top-color: #0b1c30;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        -webkit-app-region: no-drag;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="mark" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M5 17V7h6.5a4 4 0 0 1 0 8H8" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M14.5 17 19 7" stroke-linecap="round" />
+        </svg>
+      </div>
+      <h1>RAG Platform</h1>
+      <p>Starting local engine…</p>
+      <div class="spin"></div>
+    </div>
+  </body>
+</html>
