@@ -100,13 +100,17 @@ make bootstrap        # Homebrew Postgres 17, create db, alembic upgrade head
 cd backend && RAG_CONFIG_DIR=../configs .venv/bin/alembic upgrade head
 ```
 
-Run API and UI (two terminals):
+Run API and UI from the repo root:
 
 ```bash
-make api              # FastAPI http://127.0.0.1:8000
-make frontend         # after: cd frontend && npm install
-                      # Vite http://127.0.0.1:5173
+./scripts/start.sh    # API http://127.0.0.1:8000 + Vite http://127.0.0.1:5173
+./scripts/stop.sh
+./scripts/restart.sh  # stop then start
 ```
+
+Same targets: `make start`, `make stop`, `make restart`. PIDs and logs go in `.run/` (gitignored). Sources `.env` if present, uses `backend/.venv`, and sets `RAG_CONFIG_DIR` to `configs/`. Ingestion jobs run in the API process locally (no separate worker). Electron is not started.
+
+Foreground alternative (two terminals): `make api` then `make frontend` (after `cd frontend && npm install`).
 
 **Super Admin env vars** (set in `.env`, never commit): `PLATFORM_SUPERADMIN_EMAIL`, `PLATFORM_SUPERADMIN_PASSWORD`. The user is seeded when the API starts.
 
@@ -125,7 +129,7 @@ Docker is optional: `docker compose -f docker/docker-compose.yml up postgres -d`
 
 Public signup is **off** unless `RAG_ALLOW_PUBLIC_SIGNUP=1`. When it is off, Super Admin creates tenants; Tenant Admins invite users.
 
-Open http://localhost:5173 (or the desktop app). API health: `GET /api/v1/health`.
+Open http://localhost:5173 (or http://127.0.0.1:5173). API: http://127.0.0.1:8000 — health `GET /api/v1/health/live` and `/api/v1/health/ready`.
 
 ## Tests
 

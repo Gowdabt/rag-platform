@@ -70,6 +70,9 @@ Thumbs.db
 .vscode/
 .cursor/mcp.json
 
+# Local process PIDs and logs from scripts/start.sh
+.run/
+
 # Playwright, logs, local artifacts
 playwright-report/
 playwright/.cache/
