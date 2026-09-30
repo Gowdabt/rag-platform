@@ -45,17 +45,19 @@ export default function PlatformDashboardPage() {
         </Link>
       </div>
       <div className="panel">
-        <div className="table-head grid-cols-[2fr_1fr_auto]">
+        <div className="data-head cols-3">
           <span>Company</span>
           <span>Tenant ID</span>
           <span>Status</span>
         </div>
         <ul>
           {tenants.slice(0, 8).map((t) => (
-            <li key={t.id} className="table-row grid-cols-[2fr_1fr_auto]">
-              <span className="font-medium">{t.company_name || t.name || "—"}</span>
-              <span className="font-mono text-code-md text-on-variant">{t.slug || t.id}</span>
-              <StatusPill status={t.status || "active"} />
+            <li key={t.id} className="data-row cols-3" data-testid="tenant-row">
+              <span className="min-w-0 truncate font-medium">{t.company_name || t.name || "—"}</span>
+              <span className="min-w-0 truncate font-mono text-code-md text-on-variant">{t.slug || t.id}</span>
+                <span>
+                  <StatusPill status={t.status || "active"} />
+                </span>
             </li>
           ))}
           {tenants.length === 0 && <li className="px-4 py-8 text-center text-body-md text-on-variant">No tenants yet.</li>}

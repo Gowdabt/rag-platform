@@ -1,0 +1,11 @@
+Hello {{userName}},
+
+{{inviterName}} invited you to {{tenantName}} on {{applicationName}} as {{roleName}}.
+
+Accept the invitation and choose a password (expires in {{expiresIn}}):
+{{inviteUrl}}
+
+After that, sign in with tenant ID {{tenantSlug}}, your email, and the password you set.
+{{loginUrl}}
+
+— {{applicationName}}

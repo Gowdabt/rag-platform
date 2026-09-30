@@ -2,6 +2,7 @@ import { FormEvent, type ReactNode, useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { adminApi, auth } from "./api/client";
 import { defaultHome, hasAnyPermission, isSuperAdmin } from "./auth/access";
+import { CurrentUserContext } from "./auth/CurrentUserContext";
 import AppShell, { AppUser } from "./components/AppShell";
 import AuthCard from "./components/AuthCard";
 import AcceptInvitePage from "./pages/AcceptInvitePage";
@@ -62,6 +63,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const q = new URLSearchParams(location.search).get("slug");
+    if (q) setTenantSlug(q.trim().toLowerCase());
+  }, [location.search]);
+
+  useEffect(() => {
     if (!localStorage.getItem("access_token")) return;
     auth
       .me()
@@ -77,7 +83,7 @@ export default function App() {
       const tokens =
         mode === "signup"
           ? await auth.signup(email, password, tenantName)
-          : await auth.login(email, password, tenantSlug.trim() || undefined);
+          : await auth.login(email, password, tenantSlug.trim().toLowerCase() || undefined);
       localStorage.setItem("access_token", tokens.access_token);
       localStorage.setItem("refresh_token", tokens.refresh_token);
       const me = await auth.me();
@@ -143,17 +149,19 @@ export default function App() {
               />
             </label>
           ) : (
-            <label className="block text-left">
-              <span className="field-label">Tenant ID</span>
-              <input
-                className="input-field mt-1.5"
-                placeholder="Leave empty for Super Admin"
-                value={tenantSlug}
-                onChange={(e) => setTenantSlug(e.target.value)}
-                autoComplete="off"
-              />
-              <span className="field-help">Leave empty for Super Admin sign-in. Tenant slug is required for company accounts.</span>
-            </label>
+            <div className="block text-left">
+              <label className="block">
+                <span className="field-label">Tenant ID</span>
+                <input
+                  className="input-field mt-1.5"
+                  placeholder="Leave empty for Super Admin"
+                  value={tenantSlug}
+                  onChange={(e) => setTenantSlug(e.target.value)}
+                  autoComplete="off"
+                />
+              </label>
+              <span className="field-help">Leave empty for Super Admin sign-in. Tenant users enter the company slug and the password they set on the invite page — there is no shared default password.</span>
+            </div>
           )}
           <label className="block text-left">
             <span className="field-label">Email</span>
@@ -166,26 +174,28 @@ export default function App() {
               required
             />
           </label>
-          <label className="block text-left">
-            <span className="field-label">Password</span>
-            <span className="relative mt-1.5 block">
-              <input
-                className="input-field pr-16"
-                type={showPassword ? "text" : "password"}
-                placeholder={mode === "signup" ? "10+ characters" : "Your password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={mode === "signup" ? 10 : undefined}
-              />
-              <button
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-label-sm text-secondary"
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-              >
-                {showPassword ? "Hide" : "Show"}
-              </button>
-            </span>
+          <div className="block text-left">
+            <label className="block">
+              <span className="field-label">Password</span>
+              <span className="relative mt-1.5 block">
+                <input
+                  className="input-field pr-16"
+                  type={showPassword ? "text" : "password"}
+                  placeholder={mode === "signup" ? "10+ characters" : "Your password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={mode === "signup" ? 10 : undefined}
+                />
+                <button
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-label-sm text-secondary"
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </span>
+            </label>
             <span className="mt-1 flex items-center justify-between text-body-sm text-on-variant">
               <span>{mode === "signup" ? "Minimum 10 characters" : ""}</span>
               {mode === "login" && (
@@ -194,7 +204,7 @@ export default function App() {
                 </Link>
               )}
             </span>
-          </label>
+          </div>
           <div className="flex items-center justify-between rounded-lg bg-surface-low px-2.5 py-2.5">
             <span className="flex items-center gap-2 text-label-sm font-medium text-on-surface">
               <span className="status-dot h-2 w-2" />
@@ -232,6 +242,7 @@ export default function App() {
   const home = defaultHome(user);
 
   return (
+    <CurrentUserContext.Provider value={user}>
     <AppShell user={user} onLogout={logout}>
       <Routes>
         <Route
@@ -345,6 +356,7 @@ export default function App() {
         <Route path="*" element={home ? <Navigate to={home} replace /> : <AccessDenied />} />
       </Routes>
     </AppShell>
+    </CurrentUserContext.Provider>
   );
 }
 
@@ -356,7 +368,12 @@ function SuperOnly({ user, children }: { user: AppUser; children: ReactNode }) {
 }
 
 function PermRoute({ user, anyOf, children }: { user: AppUser; anyOf: string[]; children: ReactNode }) {
-  if (isSuperAdmin(user) || hasAnyPermission(user, anyOf)) return children;
+  if (isSuperAdmin(user)) {
+    const home = defaultHome(user);
+    if (!home) return <AccessDenied />;
+    return <Navigate to={home} replace />;
+  }
+  if (hasAnyPermission(user, anyOf)) return children;
   const home = defaultHome(user);
   if (!home) return <AccessDenied />;
   return <Navigate to={home} replace />;

@@ -227,6 +227,19 @@ class QueueConfig(FrozenModel):
     provider: str = "taskiq_redis"
 
 
+class EmailConfig(FrozenModel):
+    provider: str = "console"
+    from_name: str = "RAG Platform"
+    from_address: str = "no-reply@localhost"
+    public_app_url: str = "http://localhost:5173"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_secure: bool = True
+    api_key: str = ""
+
+
 class ObservabilityConfig(FrozenModel):
     log_level: str = "INFO"
     otel_enabled: bool = False
@@ -258,6 +271,7 @@ class PlatformSettings(FrozenModel):
     oauth: OauthConfig = Field(default_factory=OauthConfig)
     connectors: ConnectorsConfig = Field(default_factory=ConnectorsConfig)
     queue: QueueConfig = Field(default_factory=QueueConfig)
+    email: EmailConfig = Field(default_factory=EmailConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
     @model_validator(mode="after")
@@ -274,6 +288,7 @@ class PlatformSettings(FrozenModel):
             ("queue", self.queue.provider),
             ("memory", self.memory.provider),
             ("auth", self.auth.provider),
+            ("email", self.email.provider),
         ]
         if self.ocr.enabled:
             checks.append(("ocr", self.ocr.provider))

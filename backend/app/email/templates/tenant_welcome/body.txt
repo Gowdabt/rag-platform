@@ -1,0 +1,13 @@
+Hello {{userName}},
+
+Your organization {{tenantName}} has been created on {{applicationName}}.
+
+Tenant ID: {{tenantSlug}}
+{{setupInstructions}}
+
+If you still need to set a password, use this invite link (expires in {{expiresIn}}):
+{{inviteUrl}}
+
+Sign in: {{loginUrl}}
+
+— {{applicationName}}

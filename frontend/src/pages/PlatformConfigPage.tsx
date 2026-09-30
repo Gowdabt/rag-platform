@@ -49,7 +49,7 @@ export default function PlatformConfigPage() {
       {error && <p className="banner-error">{error}</p>}
       {configNote && <p className="text-sm text-on-variant">{configNote}</p>}
       <div className="panel">
-        <div className="grid grid-cols-[2fr_1fr_auto] gap-3 border-b border-outline-variant/40 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-on-variant">
+        <div className="data-head cols-3">
           <span>Model</span>
           <span>Provider</span>
           <span>Allow-list</span>
@@ -58,7 +58,7 @@ export default function PlatformConfigPage() {
           {models.map((m, i) => {
             const label = m.name || m.model || m.id || `model-${i}`;
             return (
-              <li key={m.id || label} className="grid grid-cols-[2fr_1fr_auto] gap-3 border-b border-outline-variant/30 px-4 py-3 text-[13px] last:border-0">
+              <li key={m.id || label} className="data-row cols-3">
                 <div>
                   <div className="font-medium">{label}</div>
                   {m.id && m.id !== label && <div className="font-mono text-[11px] text-on-variant">{m.id}</div>}

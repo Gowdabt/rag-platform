@@ -16,6 +16,10 @@ ocr:
 queue:
   provider: asyncio
 
+email:
+  provider: console
+  public_app_url: http://localhost:5173
+
 storage:
   provider: local_fs
   bucket: data/objects

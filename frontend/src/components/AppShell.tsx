@@ -27,49 +27,44 @@ export default function AppShell({
         className={`sticky top-0 z-40 border-b border-outline-variant/30 bg-surface-lowest ${desktop ? "desktop-drag" : ""}`}
       >
         <div
-          className="mx-auto flex h-14 max-w-shell items-center justify-between px-6"
+          className="mx-auto grid max-w-shell grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 py-2 sm:flex sm:h-14 sm:px-6 sm:py-0"
           style={macDesktop ? { paddingLeft: 88 } : undefined}
         >
-          <div className="flex min-w-0 items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Logo className="h-8 w-8" />
-              <span className="text-headline-sm tracking-tight">RAG Platform</span>
-            </div>
-            <div className="hidden h-4 w-px bg-outline-variant/40 sm:block" />
-            <nav className="desktop-no-drag flex flex-1 flex-wrap items-center gap-0.5">
-              {links.map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  end={link.end}
-                  className={({ isActive }) =>
-                    isActive
-                      ? "rounded px-2 py-1 text-label-md font-semibold text-on-surface bg-surface-container"
-                      : "rounded px-2 py-1 text-label-md text-on-variant hover:bg-surface-low hover:text-on-surface"
-                  }
-                >
-                  {link.label}
-                </NavLink>
-              ))}
-            </nav>
+          <div className="flex min-w-0 items-center gap-2">
+            <Logo className="h-8 w-8 shrink-0" />
+            <span className="truncate text-headline-sm tracking-tight">RAG Platform</span>
           </div>
-          <div className="desktop-no-drag ml-4 flex shrink-0 items-center gap-4">
+          <div className="desktop-no-drag flex shrink-0 items-center gap-2 sm:order-last">
             {tenantLabel && (
-              <span className="chip">
+              <span className="chip max-w-[9rem] truncate">
                 <span className="status-dot" />
                 {tenantLabel}
               </span>
             )}
-            <div className="flex items-center gap-2">
-              <span className="hidden text-body-sm font-medium text-on-variant sm:inline">{user.email}</span>
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-[12px] font-medium text-on-primary">
-                {initial}
-              </span>
-              <button className="px-1 py-0.5 text-label-md text-secondary hover:text-on-surface" type="button" onClick={onLogout}>
-                Log out
-              </button>
-            </div>
+            <span className="hidden max-w-[10rem] truncate text-body-sm font-medium text-on-variant lg:inline">{user.email}</span>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-[12px] font-medium text-on-primary">
+              {initial}
+            </span>
+            <button className="px-1 py-0.5 text-label-md text-secondary hover:text-on-surface" type="button" onClick={onLogout}>
+              Log out
+            </button>
           </div>
+          <nav className="desktop-no-drag col-span-2 flex flex-wrap items-center gap-0.5 sm:min-w-0 sm:flex-1">
+            {links.map((link) => (
+              <NavLink
+                key={link.to}
+                to={link.to}
+                end={link.end}
+                className={({ isActive }) =>
+                  isActive
+                    ? "rounded px-2 py-1 text-label-md font-semibold text-on-surface bg-surface-container"
+                    : "rounded px-2 py-1 text-label-md text-on-variant hover:bg-surface-low hover:text-on-surface"
+                }
+              >
+                {link.label}
+              </NavLink>
+            ))}
+          </nav>
         </div>
       </header>
       <main className="mx-auto flex w-full max-w-shell flex-1 flex-col px-6 py-6">{children}</main>

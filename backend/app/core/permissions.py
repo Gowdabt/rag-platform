@@ -12,48 +12,75 @@ PLATFORM_PERMISSIONS = frozenset(
     }
 )
 
-# Bidirectional aliases so old JWT-era codes and new catalog codes both work.
-PERMISSION_ALIASES: dict[str, frozenset[str]] = {
+# Same privilege, either code. Subset codes must never appear here next to a superset.
+PERMISSION_EQUIVALENTS: dict[str, frozenset[str]] = {
     "document:read": frozenset({"document:read", "documents.view"}),
-    "documents.view": frozenset({"documents.view", "document:read"}),
+    "documents.view": frozenset({"document:read", "documents.view"}),
     "document:write": frozenset({"document:write", "documents.upload"}),
-    "documents.upload": frozenset({"documents.upload", "document:write"}),
+    "documents.upload": frozenset({"document:write", "documents.upload"}),
     "document:delete": frozenset({"document:delete", "documents.delete"}),
-    "documents.delete": frozenset({"documents.delete", "document:delete"}),
-    "user:manage": frozenset({"user:manage", "users.create", "users.update", "users.disable"}),
-    "users.view": frozenset({"users.view", "user:manage"}),
-    "users.create": frozenset({"users.create", "user:manage"}),
-    "users.update": frozenset({"users.update", "user:manage"}),
-    "users.disable": frozenset({"users.disable", "user:manage"}),
-    "roles.view": frozenset({"roles.view", "user:manage"}),
-    "roles.create": frozenset({"roles.create", "user:manage"}),
-    "roles.update": frozenset({"roles.update", "user:manage"}),
-    "roles.delete": frozenset({"roles.delete", "user:manage"}),
-    "roles.assign": frozenset({"roles.assign", "user:manage"}),
-    "config:write": frozenset({"config:write", "tenant.settings.update", "ai.configuration.update"}),
-    "tenant.settings.update": frozenset({"tenant.settings.update", "config:write"}),
-    "ai.configuration.update": frozenset({"ai.configuration.update", "config:write"}),
-    "config:read": frozenset({"config:read", "tenant.settings.view", "ai.configuration.view"}),
-    "tenant.settings.view": frozenset({"tenant.settings.view", "config:read"}),
-    "ai.configuration.view": frozenset({"ai.configuration.view", "config:read"}),
+    "documents.delete": frozenset({"document:delete", "documents.delete"}),
     "audit:read": frozenset({"audit:read", "audit.view"}),
-    "audit.view": frozenset({"audit.view", "audit:read"}),
+    "audit.view": frozenset({"audit:read", "audit.view"}),
     "conversation:write": frozenset({"conversation:write", "ai.chat"}),
-    "ai.chat": frozenset({"ai.chat", "conversation:write"}),
-    "folders.create": frozenset({"folders.create", "document:write"}),
-    "folders.share": frozenset({"folders.share", "document:write"}),
-    "folders.delete": frozenset({"folders.delete", "document:delete"}),
-    "folders.update": frozenset({"folders.update", "document:write"}),
-    "documents.share": frozenset({"documents.share", "document:write"}),
-    "documents.update": frozenset({"documents.update", "document:write"}),
+    "ai.chat": frozenset({"conversation:write", "ai.chat"}),
 }
+
+# Having the key grants the values. Reverse is false (users.create is not user:manage).
+PERMISSION_GRANTS: dict[str, frozenset[str]] = {
+    "user:manage": frozenset(
+        {
+            "users.view",
+            "users.create",
+            "users.update",
+            "users.disable",
+            "roles.view",
+            "roles.create",
+            "roles.update",
+            "roles.delete",
+            "roles.assign",
+        }
+    ),
+    "config:write": frozenset({"tenant.settings.update", "ai.configuration.update"}),
+    "config:read": frozenset({"tenant.settings.view", "ai.configuration.view"}),
+    "document:write": frozenset(
+        {
+            "documents.update",
+            "documents.share",
+            "folders.create",
+            "folders.share",
+            "folders.update",
+        }
+    ),
+    "document:delete": frozenset({"folders.delete"}),
+}
+
+# Legacy name: equivalent pairs only. Do not put superset/subset codes in the same set.
+PERMISSION_ALIASES: dict[str, frozenset[str]] = dict(PERMISSION_EQUIVALENTS)
+
+
+def expand_permissions(have: frozenset[str] | set[str]) -> frozenset[str]:
+    out: set[str] = set(have)
+    changed = True
+    while changed:
+        changed = False
+        snapshot = tuple(out)
+        for code in snapshot:
+            for peer in PERMISSION_EQUIVALENTS.get(code, ()):
+                if peer not in out:
+                    out.add(peer)
+                    changed = True
+            for granted in PERMISSION_GRANTS.get(code, ()):
+                if granted not in out:
+                    out.add(granted)
+                    changed = True
+    return frozenset(out)
 
 
 def permissions_include(have: frozenset[str], needed: str) -> bool:
     if needed in have:
         return True
-    alts = PERMISSION_ALIASES.get(needed)
-    return bool(alts and have.intersection(alts))
+    return needed in expand_permissions(have)
 
 
 def is_tenant_admin_name(name: str) -> bool:

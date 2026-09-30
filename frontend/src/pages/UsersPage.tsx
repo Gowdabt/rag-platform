@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { asList, invitationsApi, rolesApi, usersApi } from "../api/client";
-import { displayRoleList, formatWhen } from "../auth/access";
+import { displayRoleList, formatWhen, hasAnyPermission } from "../auth/access";
+import { useCurrentUser } from "../auth/CurrentUserContext";
 import Modal from "../components/Modal";
 import StatusPill from "../components/StatusPill";
 import { Alert, PageHeader } from "../components/ui";
@@ -16,16 +17,52 @@ type UserRow = {
   last_login_at?: string | null;
 };
 
+function inviteUrlFrom(result: { invite_path?: string; invitation_token?: string; token?: string } | null): string {
+  const path =
+    result?.invite_path ||
+    (result?.invitation_token ? `/invite?token=${result.invitation_token}` : "") ||
+    (result?.token ? `/invite?token=${result.token}` : "");
+  if (!path) return "";
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  return `${window.location.origin}${path}`;
+}
+
+function roleNamesOf(roles: unknown): string[] {
+  if (!roles) return [];
+  if (Array.isArray(roles)) {
+    return roles
+      .map((role) => {
+        if (typeof role === "string") return role;
+        if (role && typeof role === "object") {
+          const rec = role as { name?: string; slug?: string };
+          return rec.name || rec.slug || "";
+        }
+        return "";
+      })
+      .filter(Boolean);
+  }
+  if (typeof roles === "string") return [roles];
+  return [];
+}
+
 export default function UsersPage() {
+  const me = useCurrentUser();
+  const canInvite = hasAnyPermission(me, ["users.create", "user:manage"]);
+  const canEdit = hasAnyPermission(me, ["users.update", "user:manage"]);
+  const canDisable = hasAnyPermission(me, ["users.disable", "users.update", "user:manage"]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [error, setError] = useState("");
   const [banner, setBanner] = useState("");
   const [openInvite, setOpenInvite] = useState(false);
+  const [editing, setEditing] = useState<UserRow | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  const [editName, setEditName] = useState("");
+  const [editRoles, setEditRoles] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
 
   async function refresh() {
     const [userData, roleData] = await Promise.all([usersApi.list(), rolesApi.list().catch(() => [])]);
@@ -51,14 +88,13 @@ export default function UsersPage() {
     setPending(true);
     try {
       const roleNames = roles.filter((r) => selected.includes(r.id)).map((r) => r.name);
-      const created = await invitationsApi.create({
+      await invitationsApi.create({
         name: name.trim(),
         email: email.trim(),
         role_ids: selected,
-        roles: roleNames,
+        role_names: roleNames,
       });
-      const token = created?.invitation_token || created?.token;
-      setBanner(token ? `Invitation sent. Token (dev): ${token}` : "Invitation sent.");
+      setBanner("Invitation sent. Use Copy invite on the row until they accept.");
       setOpenInvite(false);
       setName("");
       setEmail("");
@@ -66,6 +102,32 @@ export default function UsersPage() {
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send invitation");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  function openEdit(user: UserRow) {
+    setError("");
+    setEditing(user);
+    setEditName(user.name || "");
+    const names = new Set(roleNamesOf(user.roles));
+    setEditRoles(roles.filter((role) => names.has(role.name)).map((role) => role.id));
+  }
+
+  async function onSaveEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editing) return;
+    setError("");
+    setBanner("");
+    setPending(true);
+    try {
+      await usersApi.patch(editing.id, { name: editName.trim(), role_ids: editRoles });
+      setBanner("User updated.");
+      setEditing(null);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update user");
     } finally {
       setPending(false);
     }
@@ -83,8 +145,33 @@ export default function UsersPage() {
     }
   }
 
-  function toggleRole(id: string) {
-    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  async function copyInvite(user: UserRow) {
+    setError("");
+    setBanner("");
+    setCopyingId(user.id);
+    try {
+      const result = await usersApi.resendInvite(user.id);
+      const url = inviteUrlFrom(result);
+      if (!url) {
+        setError("Could not create an invite link.");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(url);
+        setBanner("Invite link copied. The previous unused invite no longer works.");
+      } catch {
+        setBanner(`Invite link: ${url}`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not copy invite");
+    } finally {
+      setCopyingId(null);
+    }
+  }
+
+  function toggleRole(id: string, into: "invite" | "edit") {
+    const set = into === "invite" ? setSelected : setEditRoles;
+    set((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
   return (
@@ -93,43 +180,70 @@ export default function UsersPage() {
         title="Users"
         subtitle="Invite people to this tenant and disable accounts that should no longer sign in."
         actions={
-          <button
-            className="btn btn-primary"
-            type="button"
-            onClick={() => {
-              setError("");
-              setOpenInvite(true);
-            }}
-          >
-            Invite user
-          </button>
+          canInvite ? (
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={() => {
+                setError("");
+                setOpenInvite(true);
+              }}
+            >
+              Invite user
+            </button>
+          ) : undefined
         }
       />
       {error && <Alert>{error}</Alert>}
       {banner && <Alert tone="ok">{banner}</Alert>}
       <div className="panel">
-        <div className="table-head grid-cols-[1.3fr_1.4fr_1.2fr_auto_auto_auto]">
+        <div className="data-head cols-6">
           <span>Name</span>
           <span>Email</span>
           <span>Roles</span>
           <span>Status</span>
           <span>Last login</span>
-          <span />
+          <span>Actions</span>
         </div>
         <ul>
           {users.map((user) => {
             const status = (user.status || "active").toLowerCase();
             const disabled = status === "disabled" || status === "inactive";
+            const invited = status === "invited";
             return (
-              <li key={user.id} className="table-row grid-cols-[1.3fr_1.4fr_1.2fr_auto_auto_auto]">
-                <span className="font-medium">{user.name || "—"}</span>
-                <span className="truncate">{user.email}</span>
-                <span className="truncate text-on-variant">{displayRoleList(user.roles)}</span>
-                <StatusPill status={user.status || "active"} />
-                <span className="font-mono text-code-sm text-on-variant">{formatWhen(user.last_login_at)}</span>
-                <button className="link-action" type="button" onClick={() => toggleStatus(user)}>
-                  {disabled ? "Enable" : "Disable"}
-                </button>
+              <li key={user.id} className="data-row cols-6" data-testid="user-row">
+                <span className="min-w-0 truncate font-medium">{user.name || "—"}</span>
+                <span className="min-w-0 truncate">{user.email}</span>
+                <span className="min-w-0 truncate text-on-variant">{displayRoleList(user.roles)}</span>
+                <span data-testid="user-status">
+                  <StatusPill status={user.status || "active"} />
+                </span>
+                <span className="whitespace-nowrap font-mono text-code-sm text-on-variant" data-testid="user-last-login">
+                  {formatWhen(user.last_login_at)}
+                </span>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="user-actions">
+                  {canEdit && (
+                    <button className="link-action" type="button" onClick={() => openEdit(user)}>
+                      Edit
+                    </button>
+                  )}
+                  {canInvite && invited && (
+                    <button
+                      className="link-action"
+                      type="button"
+                      data-testid="user-copy-invite"
+                      disabled={copyingId === user.id}
+                      onClick={() => copyInvite(user)}
+                    >
+                      {copyingId === user.id ? "Copying…" : "Copy invite"}
+                    </button>
+                  )}
+                  {canDisable && (
+                    <button className="link-action" type="button" onClick={() => toggleStatus(user)}>
+                      {disabled ? "Enable" : "Disable"}
+                    </button>
+                  )}
+                </div>
               </li>
             );
           })}
@@ -140,6 +254,7 @@ export default function UsersPage() {
       {openInvite && (
         <Modal title="Invite User" onClose={() => setOpenInvite(false)}>
           <form className="mt-4 space-y-3 text-sm" onSubmit={onInvite}>
+            {error && <Alert>{error}</Alert>}
             <label className="block">
               Name
               <input
@@ -164,7 +279,7 @@ export default function UsersPage() {
               <div className="mt-2 max-h-48 space-y-1 overflow-auto rounded-lg border border-outline-variant/50 p-2">
                 {roles.map((role) => (
                   <label key={role.id} className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-surface-low">
-                    <input type="checkbox" checked={selected.includes(role.id)} onChange={() => toggleRole(role.id)} />
+                    <input type="checkbox" checked={selected.includes(role.id)} onChange={() => toggleRole(role.id, "invite")} />
                     {role.name}
                   </label>
                 ))}
@@ -177,6 +292,51 @@ export default function UsersPage() {
               </button>
               <button className="btn btn-primary" type="submit" disabled={pending}>
                 {pending ? "Sending…" : "Send invitation"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {editing && (
+        <Modal title="Edit user" onClose={() => setEditing(null)}>
+          <form className="mt-4 space-y-3 text-sm" onSubmit={onSaveEdit}>
+            {error && <Alert>{error}</Alert>}
+            <label className="block">
+              Name
+              <input
+                className="input-field mt-1"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                required
+              />
+            </label>
+            <label className="block">
+              Email
+              <input className="input-field mt-1" value={editing.email || ""} disabled />
+              <span className="field-help">Email cannot be changed.</span>
+            </label>
+            <fieldset>
+              <legend className="text-sm">Roles</legend>
+              <div className="mt-2 max-h-48 space-y-1 overflow-auto rounded-lg border border-outline-variant/50 p-2">
+                {roles.map((role) => (
+                  <label key={role.id} className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-surface-low">
+                    <input
+                      type="checkbox"
+                      checked={editRoles.includes(role.id)}
+                      onChange={() => toggleRole(role.id, "edit")}
+                    />
+                    {role.name}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="flex justify-end gap-2 pt-2">
+              <button className="btn btn-secondary" type="button" onClick={() => setEditing(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" type="submit" disabled={pending || editRoles.length === 0}>
+                {pending ? "Saving…" : "Save"}
               </button>
             </div>
           </form>

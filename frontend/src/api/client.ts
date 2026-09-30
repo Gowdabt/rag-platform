@@ -40,9 +40,9 @@ function token() {
 
 function errorMessage(body: unknown, fallback: string): string {
   if (!body || typeof body !== "object") return fallback;
-  const rec = body as { detail?: unknown; title?: string; message?: string };
+  const rec = body as { detail?: unknown; title?: string; message?: string; errors?: unknown };
   const detail = rec.detail;
-  if (typeof detail === "string" && detail.trim()) return detail;
+  if (typeof detail === "string" && detail.trim() && detail.trim() !== "Request validation failed") return detail;
   if (Array.isArray(detail)) {
     const parts = detail.map((item) => {
       if (typeof item === "string") return item;
@@ -52,6 +52,19 @@ function errorMessage(body: unknown, fallback: string): string {
     const joined = parts.filter(Boolean).join("; ");
     if (joined) return joined;
   }
+  if (Array.isArray(rec.errors)) {
+    const parts = rec.errors.map((item) => {
+      if (!item || typeof item !== "object") return "";
+      const err = item as { loc?: unknown; msg?: string };
+      const loc = Array.isArray(err.loc) ? err.loc.filter((p) => p !== "body" && p !== "query").join(".") : "";
+      const msg = typeof err.msg === "string" ? err.msg : "";
+      if (loc && msg) return `${loc}: ${msg}`;
+      return msg;
+    });
+    const joined = parts.filter(Boolean).join("; ");
+    if (joined) return joined;
+  }
+  if (typeof detail === "string" && detail.trim()) return detail;
   if (typeof rec.title === "string" && rec.title.trim()) return rec.title;
   if (typeof rec.message === "string" && rec.message.trim()) return rec.message;
   return fallback;
@@ -116,24 +129,33 @@ export async function apiOptional(path: string, init: RequestInit = {}) {
   }
 }
 
+function normalizeTenantSlug(slug?: string): string {
+  return (slug || "").trim().toLowerCase();
+}
+
 export const auth = {
   signup: (email: string, password: string, tenant_name: string) =>
     api("/api/v1/auth/signup", { method: "POST", body: JSON.stringify({ email, password, tenant_name }) }),
-  login: (email: string, password: string, tenant_slug?: string) =>
-    api("/api/v1/auth/login", {
+  login: (email: string, password: string, tenant_slug?: string) => {
+    const slug = normalizeTenantSlug(tenant_slug);
+    return api("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify({
         email,
         password,
-        ...(tenant_slug ? { tenant_slug } : {}),
+        ...(slug ? { tenant_slug: slug } : {}),
       }),
-    }),
+    });
+  },
   logout: (refresh_token: string) =>
     api("/api/v1/auth/logout", { method: "POST", body: JSON.stringify({ refresh_token }) }),
   me: () => api("/api/v1/auth/me"),
   features: () => api("/api/v1/auth/features"),
   forgotPassword: (tenant_slug: string, email: string) =>
-    api("/api/v1/auth/forgot-password", { method: "POST", body: JSON.stringify({ tenant_slug, email }) }),
+    api("/api/v1/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ tenant_slug: normalizeTenantSlug(tenant_slug), email }),
+    }),
   resetPassword: (token: string, password: string) =>
     api("/api/v1/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) }),
   acceptInvite: (token: string, password: string) =>
@@ -287,19 +309,26 @@ export const evalApi = {
     api(`/api/v1/eval/datasets/${datasetId}/runs`, { method: "POST", body: JSON.stringify({}) }),
 };
 
+function withPage(path: string, limit = 100, offset = 0): string {
+  const join = path.includes("?") ? "&" : "?";
+  return `${path}${join}limit=${limit}&offset=${offset}`;
+}
+
 export const platformApi = {
-  tenants: () => api("/api/v1/platform/tenants"),
+  tenants: () => api(withPage("/api/v1/platform/tenants")),
   getTenant: (id: string) => api(`/api/v1/platform/tenants/${id}`),
   createTenant: (body: {
-    company_name: string;
+    name: string;
     slug: string;
     admin_name: string;
     admin_email: string;
+    admin_password?: string;
+    company_name?: string;
   }) => api("/api/v1/platform/tenants", { method: "POST", body: JSON.stringify(body) }),
   patchTenant: (id: string, body: Record<string, unknown>) =>
     api(`/api/v1/platform/tenants/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   aiCatalog: () => api("/api/v1/platform/ai-catalog"),
-  auditLogs: () => api("/api/v1/platform/audit-logs"),
+  auditLogs: () => api(withPage("/api/v1/platform/audit-logs")),
 };
 
 export const foldersApi = {
@@ -313,16 +342,10 @@ export const foldersApi = {
   share: (
     id: string,
     body: {
-      type: "user" | "role";
+      subject_type: "user" | "role";
       email?: string;
       role_id?: string;
-      permissions: {
-        view: boolean;
-        edit: boolean;
-        upload: boolean;
-        delete: boolean;
-        share: boolean;
-      };
+      actions: string[];
     },
   ) => api(`/api/v1/folders/${id}/share`, { method: "POST", body: JSON.stringify(body) }),
   unshare: (id: string, grantId: string) =>
@@ -340,14 +363,23 @@ export const rolesApi = {
 };
 
 export const invitationsApi = {
-  create: (body: { name: string; email: string; role_ids?: string[]; roles?: string[] }) =>
-    api("/api/v1/users/invitations", { method: "POST", body: JSON.stringify(body) }),
+  create: (body: { name: string; email: string; role_ids?: string[]; role_names?: string[]; roles?: string[] }) =>
+    api("/api/v1/users/invitations", {
+      method: "POST",
+      body: JSON.stringify({
+        name: body.name,
+        email: body.email,
+        role_ids: body.role_ids,
+        role_names: body.role_names || body.roles,
+      }),
+    }),
 };
 
 export const usersApi = {
   list: () => api("/api/v1/users"),
   patch: (id: string, body: Record<string, unknown>) =>
     api(`/api/v1/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  resendInvite: (id: string) => api(`/api/v1/users/${id}/resend-invite`, { method: "POST" }),
 };
 
 export const aiConfigApi = {

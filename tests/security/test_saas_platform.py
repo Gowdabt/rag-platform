@@ -137,6 +137,11 @@ def test_super_admin_creates_tenant_admin_accepts_invite_and_logs_in_with_slug(m
         token = created.json()["invitation_token"]
         tenant = created.json()["tenant"]
         assert tenant["slug"] == slug
+        listed = client.get("/api/v1/platform/tenants?limit=100&offset=0", headers=sa)
+        assert listed.status_code == 200, listed.text
+        match = next(row for row in listed.json() if row["slug"] == slug)
+        assert match["name"] == "Acme"
+        assert match.get("admin_email") == admin_email
 
         accepted = client.post(
             "/api/v1/auth/accept-invite",
@@ -155,6 +160,197 @@ def test_super_admin_creates_tenant_admin_accepts_invite_and_logs_in_with_slug(m
         assert body["is_super_admin"] is False
         assert body["tenant_slug"] == slug
         assert "Tenant Admin" in body["roles"] or "Admin" in body["roles"]
+
+
+def test_super_admin_create_accepts_company_name_slugifies_and_optional_password(monkeypatch):
+    sa_email = f"sa-{uuid4().hex[:8]}@example.com"
+    monkeypatch.setenv("PLATFORM_SUPERADMIN_EMAIL", sa_email)
+    monkeypatch.setenv("PLATFORM_SUPERADMIN_PASSWORD", "supersecret1")
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": sa_email, "password": "supersecret1"})
+        if login.status_code >= 500:
+            pytest.skip("database unavailable")
+        assert login.status_code == 200, login.text
+        sa = _headers(login.json()["access_token"])
+        suffix = uuid4().hex[:6]
+        admin_email = f"gowda-{suffix}@salesforce.com"
+        created = client.post(
+            "/api/v1/platform/tenants",
+            headers=sa,
+            json={
+                "company_name": "Salesforce",
+                "slug": f"Salesforce-{suffix}",
+                "admin_name": "Gowda",
+                "admin_email": admin_email,
+            },
+        )
+        assert created.status_code == 200, created.text
+        body = created.json()
+        assert body["slug"] == f"salesforce-{suffix}"
+        assert body["tenant"]["name"] == "Salesforce"
+        assert body["password_set"] is False
+        assert body.get("invitation_token")
+        assert body.get("invite_path", "").startswith("/invite?token=")
+        assert body.get("invitation_expires_at")
+
+        listed = client.get("/api/v1/platform/tenants?limit=100&offset=0", headers=sa)
+        assert listed.status_code == 200
+        row = next(item for item in listed.json() if item["slug"] == f"salesforce-{suffix}")
+        assert row["admin_email"] == admin_email
+        assert row["company_name"] == "Salesforce"
+
+        missing = client.post(
+            "/api/v1/platform/tenants",
+            headers=sa,
+            json={
+                "company_name": "Nope",
+                "slug": f"nope-{suffix}",
+                "admin_name": "Ada",
+            },
+        )
+        assert missing.status_code == 422
+        assert "admin_email" in missing.json()["detail"]
+
+        zero = client.get("/api/v1/platform/tenants?limit=0", headers=sa)
+        assert zero.status_code == 422
+        assert "limit" in zero.json()["detail"].lower()
+
+        admin_email_pw = f"ready-{suffix}@salesforce.com"
+        with_password = client.post(
+            "/api/v1/platform/tenants",
+            headers=sa,
+            json={
+                "name": "Ready Co",
+                "slug": f"Ready-{suffix}",
+                "admin_name": "Ready",
+                "admin_email": admin_email_pw,
+                "admin_password": "supersecret1",
+            },
+        )
+        assert with_password.status_code == 200, with_password.text
+        assert with_password.json()["password_set"] is True
+        logged = client.post(
+            "/api/v1/auth/login",
+            json={"email": admin_email_pw, "password": "supersecret1", "tenant_slug": f"ready-{suffix}"},
+        )
+        assert logged.status_code == 200, logged.text
+
+
+def test_super_admin_create_tenant_seeds_one_user_per_default_role(monkeypatch):
+    sa_email = f"sa-{uuid4().hex[:8]}@example.com"
+    monkeypatch.setenv("PLATFORM_SUPERADMIN_EMAIL", sa_email)
+    monkeypatch.setenv("PLATFORM_SUPERADMIN_PASSWORD", "supersecret1")
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": sa_email, "password": "supersecret1"})
+        if login.status_code >= 500:
+            pytest.skip("database unavailable")
+        assert login.status_code == 200, login.text
+        sa = _headers(login.json()["access_token"])
+        suffix = uuid4().hex[:6]
+        slug = f"seed-{suffix}"
+        admin_email = f"owner-{suffix}@example.com"
+        created = client.post(
+            "/api/v1/platform/tenants",
+            headers=sa,
+            json={
+                "name": "Seed Co",
+                "slug": slug,
+                "admin_name": "Owner",
+                "admin_email": admin_email,
+                "admin_password": "supersecret1",
+            },
+        )
+        assert created.status_code == 200, created.text
+        body = created.json()
+        assert body["password_set"] is True
+        seeded = body["seeded_users"]
+        assert len(seeded) == 3
+        by_role = {row["role"]: row for row in seeded}
+        assert set(by_role) == {"Tenant Admin", "Member", "Viewer"}
+        assert by_role["Tenant Admin"]["email"] == admin_email
+        assert by_role["Tenant Admin"]["is_demo"] is False
+        assert by_role["Tenant Admin"]["invitation_token"] == body["invitation_token"]
+        assert by_role["Member"]["email"] == f"member@{slug}.demo"
+        assert by_role["Member"]["name"] == "Member (demo)"
+        assert by_role["Member"]["status"] == "invited"
+        assert by_role["Member"]["is_demo"] is True
+        assert by_role["Member"]["invitation_token"]
+        assert by_role["Member"]["invite_path"].startswith("/invite?token=")
+        assert by_role["Viewer"]["email"] == f"viewer@{slug}.demo"
+        assert by_role["Viewer"]["name"] == "Viewer (demo)"
+        assert by_role["Viewer"]["status"] == "invited"
+        assert by_role["Viewer"]["invitation_token"]
+        assert sum(1 for row in seeded if row["role"] == "Tenant Admin") == 1
+
+        logged = client.post(
+            "/api/v1/auth/login",
+            json={"email": admin_email, "password": "supersecret1", "tenant_slug": slug},
+        )
+        assert logged.status_code == 200, logged.text
+        admin = _headers(logged.json()["access_token"])
+        roles = client.get("/api/v1/roles", headers=admin)
+        assert roles.status_code == 200, roles.text
+        assert {row["name"] for row in roles.json()} == {"Tenant Admin", "Member", "Viewer"}
+        users = client.get("/api/v1/users", headers=admin)
+        assert users.status_code == 200, users.text
+        rows = users.json()
+        assert len(rows) == 3
+        by_email = {row["email"]: row for row in rows}
+        assert "Tenant Admin" in by_email[admin_email]["roles"]
+        assert "Member" in by_email[f"member@{slug}.demo"]["roles"]
+        assert "Viewer" in by_email[f"viewer@{slug}.demo"]["roles"]
+        assert sum(1 for row in rows if "Tenant Admin" in (row.get("roles") or [])) == 1
+        assert by_email[f"member@{slug}.demo"]["status"] == "invited"
+        denied = client.post(
+            "/api/v1/auth/login",
+            json={"email": f"member@{slug}.demo", "password": "supersecret1", "tenant_slug": slug},
+        )
+        assert denied.status_code in {401, 403}
+        accepted = client.post(
+            "/api/v1/auth/accept-invite",
+            json={"token": by_role["Member"]["invitation_token"], "password": "supersecret1"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        me = client.get("/api/v1/auth/me", headers=_headers(accepted.json()["access_token"]))
+        assert me.status_code == 200
+        assert "Member" in me.json()["roles"]
+
+
+def test_demo_member_email_suffixes_when_admin_email_collides(monkeypatch):
+    sa_email = f"sa-{uuid4().hex[:8]}@example.com"
+    monkeypatch.setenv("PLATFORM_SUPERADMIN_EMAIL", sa_email)
+    monkeypatch.setenv("PLATFORM_SUPERADMIN_PASSWORD", "supersecret1")
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": sa_email, "password": "supersecret1"})
+        if login.status_code >= 500:
+            pytest.skip("database unavailable")
+        assert login.status_code == 200, login.text
+        sa = _headers(login.json()["access_token"])
+        suffix = uuid4().hex[:6]
+        slug = f"hit-{suffix}"
+        colliding = f"member@{slug}.demo"
+        created = client.post(
+            "/api/v1/platform/tenants",
+            headers=sa,
+            json={
+                "name": "Hit Co",
+                "slug": slug,
+                "admin_name": "Member Demo",
+                "admin_email": colliding,
+                "admin_password": "supersecret1",
+            },
+        )
+        assert created.status_code == 200, created.text
+        seeded = created.json()["seeded_users"]
+        by_role = {row["role"]: row for row in seeded}
+        assert by_role["Tenant Admin"]["email"] == colliding
+        assert by_role["Member"]["email"] == f"member-2@{slug}.demo"
+        assert by_role["Viewer"]["email"] == f"viewer@{slug}.demo"
+        assert len(seeded) == 3
+        assert sum(1 for row in seeded if row["role"] == "Tenant Admin") == 1
 
 
 def test_tenant_isolation_for_docs_folders_conversations_and_ai_config():

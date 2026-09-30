@@ -174,7 +174,7 @@
   }
 
   .panel {
-    @apply overflow-hidden rounded-xl border border-outline-variant/50 bg-surface-lowest shadow-card;
+    @apply overflow-x-auto rounded-xl border border-outline-variant/50 bg-surface-lowest shadow-card;
   }
 
   .metric {
@@ -237,12 +237,86 @@
     @apply rounded-lg bg-surface-low px-3 py-2.5 text-[12px] leading-[18px] text-on-surface;
   }
 
-  .table-head {
-    @apply grid gap-3 border-b border-outline-variant/40 bg-background px-4 py-2 text-[11px] font-medium uppercase tracking-[0.02em] text-on-variant;
+  /* Named data-row (not table-row): Tailwind's table-row utility is display:table-row and mashes cells. */
+  .data-head,
+  .data-row {
+    display: grid;
+    align-items: center;
+    column-gap: 0.75rem;
+    padding: 0.5rem 1rem;
+    font-size: 13px;
   }
 
-  .table-row {
-    @apply grid items-center gap-3 border-b border-outline-variant/30 px-4 py-3 text-[13px] last:border-0 hover:bg-background;
+  .data-head {
+    border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
+    background: var(--color-background);
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--color-on-surface-variant);
+  }
+
+  .data-row {
+    border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 30%, transparent);
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .data-row:last-child {
+    border-bottom: 0;
+  }
+
+  .data-row:hover {
+    background: var(--color-background);
+  }
+
+  /* Explicit track sizes (not auto): .data-head and .data-row are separate grids, so auto
+     columns size to each row's content and misalign headers vs cells (Disable under LAST LOGIN). */
+  .cols-tenant {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 1.6fr) 6.75rem 7.5rem;
+  }
+
+  .cols-3 {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) 7rem;
+  }
+
+  .cols-4 {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr) 6.5rem 7rem;
+  }
+
+  .cols-5 {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) 4.75rem 7rem 5rem;
+  }
+
+  .cols-6 {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.3fr) minmax(0, 1fr) 6.75rem 10.5rem 13rem;
+  }
+
+  .cols-audit-3 {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 10.5rem;
+  }
+
+  .cols-audit-4 {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) 10.5rem;
+  }
+
+  @media (max-width: 640px) {
+    .cols-tenant,
+    .cols-3,
+    .cols-4,
+    .cols-5,
+    .cols-6,
+    .cols-audit-3,
+    .cols-audit-4 {
+      min-width: 40rem;
+    }
+
+    .cols-6 {
+      min-width: 52rem;
+    }
   }
 
   .link-action {

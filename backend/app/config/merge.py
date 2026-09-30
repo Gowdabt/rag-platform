@@ -39,6 +39,7 @@ ALWAYS_DENIED_PREFIXES = (
     "vector_store.api_key",
     "storage.access_key",
     "storage.secret_key",
+    "email.",
 )
 
 USER_REQUEST_DENIED_PREFIXES = (
@@ -58,6 +59,7 @@ USER_REQUEST_DENIED_PREFIXES = (
     "memory.enabled",
     "ocr.",
     "model_routing.",
+    "email.",
 )
 
 

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { asList, rolesApi } from "../api/client";
-import { PERMISSION_GROUPS, permissionGroup, type PermissionGroup } from "../auth/access";
+import { PERMISSION_GROUPS, hasAnyPermission, permissionGroup, type PermissionGroup } from "../auth/access";
+import { useCurrentUser } from "../auth/CurrentUserContext";
 import Modal from "../components/Modal";
 import { Alert, PageHeader } from "../components/ui";
 
@@ -8,6 +9,7 @@ type RoleRow = {
   id: string;
   name: string;
   description?: string | null;
+  permission_codes?: string[];
   permissions?: string[];
   is_system?: boolean;
 };
@@ -41,12 +43,16 @@ function normalizePermissions(data: unknown): PermItem[] {
 }
 
 function rolePermissionCodes(role: RoleRow): string[] {
-  const perms = role.permissions;
+  const perms = role.permission_codes || role.permissions;
   if (!Array.isArray(perms)) return [];
   return perms.map((p) => (typeof p === "string" ? p : String(p))).filter(Boolean);
 }
 
 export default function RolesPage() {
+  const user = useCurrentUser();
+  const canCreate = hasAnyPermission(user, ["roles.create", "user:manage"]);
+  const canUpdate = hasAnyPermission(user, ["roles.update", "user:manage"]);
+  const canDelete = hasAnyPermission(user, ["roles.delete", "user:manage"]);
   const [roles, setRoles] = useState<RoleRow[]>([]);
   const [catalog, setCatalog] = useState<PermItem[]>([]);
   const [error, setError] = useState("");
@@ -138,23 +144,25 @@ export default function RolesPage() {
         title="Roles"
         subtitle="Group permissions for Users, Folders, Documents, AI, and Admin."
         actions={
+          canCreate ? (
           <button className="btn btn-primary" type="button" onClick={openCreate}>
             + Create Role
           </button>
+          ) : undefined
         }
       />
       {error && <Alert>{error}</Alert>}
       <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
         <div className="panel">
-          <div className="table-head grid-cols-[1.2fr_2fr_auto_auto]">
+          <div className="data-head cols-4">
             <span>Name</span>
             <span>Description</span>
             <span>Permissions</span>
-            <span />
+            <span>Actions</span>
           </div>
           <ul>
             {roles.map((role) => (
-              <li key={role.id} className="table-row grid-cols-[1.2fr_2fr_auto_auto]">
+              <li key={role.id} className="data-row cols-4">
                 <div>
                   <div className="font-medium">{role.name}</div>
                   {role.is_system && <div className="text-label-sm text-on-variant">System role</div>}
@@ -162,9 +170,12 @@ export default function RolesPage() {
                 <span className="truncate text-on-variant">{role.description || "—"}</span>
                 <span className="chip">{rolePermissionCodes(role).length}</span>
                 <div className="flex gap-3">
+                  {canUpdate && (
                   <button className="link-action" type="button" onClick={() => openEdit(role)}>
                     Edit
                   </button>
+                  )}
+                  {canDelete && (
                   <button
                     className="link-action disabled:cursor-not-allowed disabled:opacity-40"
                     type="button"
@@ -174,6 +185,7 @@ export default function RolesPage() {
                   >
                     Delete
                   </button>
+                  )}
                 </div>
               </li>
             ))}

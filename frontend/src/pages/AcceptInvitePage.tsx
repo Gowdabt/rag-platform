@@ -49,7 +49,7 @@ export default function AcceptInvitePage() {
   }
 
   return (
-    <AuthCard title="Accept invite" subtitle="Set a password to join your tenant.">
+    <AuthCard title="Accept invite" subtitle="Choose a password for this tenant. Then sign in with Tenant ID (slug), email, and the password you set here. There is no shared default password.">
       <form className="mt-6 space-y-4" onSubmit={onSubmit}>
         {error && (
           <div className="banner-error">{error}</div>

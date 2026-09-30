@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.db.session import session_factory
@@ -27,6 +27,14 @@ class LoginIn(BaseModel):
     tenant_id: UUID | None = None
     tenant_slug: str | None = None
 
+    @field_validator("tenant_slug")
+    @classmethod
+    def normalize_login_slug(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        slug = value.strip().lower()
+        return slug or None
+
 
 class RefreshIn(BaseModel):
     refresh_token: str
@@ -44,6 +52,14 @@ class AcceptInviteIn(BaseModel):
 class ForgotPasswordIn(BaseModel):
     email: EmailStr
     tenant_slug: str
+
+    @field_validator("tenant_slug")
+    @classmethod
+    def normalize_forgot_slug(cls, value: str) -> str:
+        slug = value.strip().lower()
+        if not slug:
+            raise ValueError("tenant_slug cannot be empty")
+        return slug
 
 
 class ResetPasswordIn(BaseModel):

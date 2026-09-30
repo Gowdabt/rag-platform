@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.db.rls import apply_rls
@@ -25,13 +25,26 @@ class FolderPatchIn(BaseModel):
 
 
 class FolderShareIn(BaseModel):
-    subject_type: str
+    model_config = ConfigDict(populate_by_name=True)
+    subject_type: str = Field(validation_alias=AliasChoices("subject_type", "type"))
     email: str | None = None
     user_id: UUID | None = None
     role_id: UUID | None = None
     role_name: str | None = None
-    actions: list[str]
+    actions: list[str] = Field(default_factory=list)
     deny: bool = False
+    permissions: dict[str, bool] | list[str] | None = None
+
+    @model_validator(mode="after")
+    def actions_from_permissions(self) -> FolderShareIn:
+        if self.actions:
+            return self
+        perms = self.permissions
+        if isinstance(perms, list):
+            object.__setattr__(self, "actions", [str(item) for item in perms])
+        elif isinstance(perms, dict):
+            object.__setattr__(self, "actions", [key for key, enabled in perms.items() if enabled])
+        return self
 
 
 router = APIRouter(prefix="/api/v1", tags=["folders"])

@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { asList, foldersApi, rolesApi } from "../api/client";
+import { hasAnyPermission } from "../auth/access";
+import { useCurrentUser } from "../auth/CurrentUserContext";
 import Modal from "../components/Modal";
 import { Alert, PageHeader } from "../components/ui";
 import { untrustedText } from "../security/untrusted";
@@ -8,16 +10,19 @@ type Folder = {
   id: string;
   name: string;
   parent_id?: string | null;
+  owner_user_id?: string | null;
   children?: Folder[];
 };
 
 type Grant = {
   id: string;
   type?: "user" | "role";
+  subject_type?: "user" | "role";
   principal_type?: "user" | "role";
   email?: string;
   role_id?: string;
   role_name?: string;
+  actions?: string[];
   permissions?: string[] | Record<string, boolean>;
 };
 
@@ -42,6 +47,7 @@ function flattenFolders(rows: Folder[], parentId: string | null = null, seen = n
       id: row.id,
       name: row.name,
       parent_id: row.parent_id ?? parentId,
+      owner_user_id: row.owner_user_id,
       children: row.children,
     };
     out.push(node);
@@ -51,10 +57,11 @@ function flattenFolders(rows: Folder[], parentId: string | null = null, seen = n
 }
 
 function grantType(grant: Grant): "user" | "role" {
-  return grant.type || grant.principal_type || (grant.role_id || grant.role_name ? "role" : "user");
+  return grant.subject_type || grant.type || grant.principal_type || (grant.role_id || grant.role_name ? "role" : "user");
 }
 
 function grantPerms(grant: Grant): string {
+  if (Array.isArray(grant.actions) && grant.actions.length) return grant.actions.join(", ");
   const p = grant.permissions;
   if (Array.isArray(p)) return p.join(", ") || "—";
   if (p && typeof p === "object") {
@@ -67,6 +74,11 @@ function grantPerms(grant: Grant): string {
 }
 
 export default function FoldersPage() {
+  const user = useCurrentUser();
+  const canCreate = hasAnyPermission(user, ["folders.create", "document:write"]);
+  const canShare = hasAnyPermission(user, ["folders.share", "document:write"]);
+  const canUpdate = hasAnyPermission(user, ["folders.update", "document:write"]);
+  const canDelete = hasAnyPermission(user, ["folders.delete", "document:delete"]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -93,6 +105,10 @@ export default function FoldersPage() {
     return map;
   }, [flat]);
   const selected = flat.find((f) => f.id === selectedId) || null;
+  const ownsSelected = Boolean(selected?.owner_user_id && user?.user_id && selected.owner_user_id === user.user_id);
+  const showRename = canUpdate || ownsSelected;
+  const showDelete = canDelete || ownsSelected;
+  const showShare = canShare || ownsSelected;
 
   async function refresh() {
     const [folderData, roleData] = await Promise.all([foldersApi.list(), rolesApi.list().catch(() => [])]);
@@ -166,10 +182,10 @@ export default function FoldersPage() {
     setError("");
     try {
       await foldersApi.share(selectedId, {
-        type: shareType,
+        subject_type: shareType,
         email: shareType === "user" ? shareEmail.trim() : undefined,
         role_id: shareType === "role" ? shareRole : undefined,
-        permissions: access,
+        actions: (["view", "edit", "upload", "delete", "share"] as const).filter((key) => access[key]),
       });
       setShareEmail("");
       const data = await foldersApi.shares(selectedId);
@@ -236,11 +252,12 @@ export default function FoldersPage() {
         subtitle="Folders for this tenant. Share view, edit, upload, delete, and share access with users or roles."
       />
       {error && <Alert>{error}</Alert>}
-      <div className="flex min-h-[calc(100vh-12rem)] overflow-hidden rounded-xl bg-surface-lowest shadow-card">
-        <aside className="flex w-72 shrink-0 flex-col bg-surface-low/70">
+      <div className="flex min-h-[calc(100vh-12rem)] flex-col overflow-hidden rounded-xl bg-surface-lowest shadow-card lg:flex-row">
+        <aside className="flex w-full shrink-0 flex-col bg-surface-low/70 lg:w-72">
           <div className="flex items-center justify-between px-3 pt-3">
             <span className="page-kicker">Folders</span>
           </div>
+          {canCreate ? (
           <form className="flex gap-2 p-3" onSubmit={onCreate}>
             <input
               className="input-field min-w-0 flex-1"
@@ -252,6 +269,9 @@ export default function FoldersPage() {
               Create
             </button>
           </form>
+          ) : (
+            <p className="px-3 py-2 text-body-sm text-on-variant">You can browse folders shared with you.</p>
+          )}
           {selected && (
             <button
               className="px-3 pb-2 text-left text-label-sm text-on-variant underline underline-offset-2"
@@ -274,6 +294,7 @@ export default function FoldersPage() {
                   <p className="text-body-sm text-on-variant">Share panel for this folder</p>
                 </div>
                 <div className="flex gap-2">
+                  {showRename && (
                   <button
                     className="btn btn-secondary"
                     type="button"
@@ -284,9 +305,12 @@ export default function FoldersPage() {
                   >
                     Rename
                   </button>
+                  )}
+                  {showDelete && (
                   <button className="btn btn-danger" type="button" onClick={onDelete}>
                     Delete
                   </button>
+                  )}
                 </div>
               </div>
               <div className="panel p-4">
@@ -301,13 +325,16 @@ export default function FoldersPage() {
                         <span className="ml-2 text-label-sm uppercase tracking-wide text-on-variant">{grantType(grant)}</span>
                         <div className="text-body-sm text-on-variant">{grantPerms(grant)}</div>
                       </div>
+                      {showShare && (
                       <button className="link-action" type="button" onClick={() => onUnshare(grant.id)}>
                         Remove
                       </button>
+                      )}
                     </li>
                   ))}
                   {grants.length === 0 && <li className="text-on-variant">No grants yet.</li>}
                 </ul>
+                {showShare && (
                 <form className="mt-4 space-y-3 border-t border-outline-variant/40 pt-4 text-body-md" onSubmit={onShare}>
                   <h4 className="font-medium">Add Access</h4>
                   <label className="block">
@@ -366,6 +393,7 @@ export default function FoldersPage() {
                     Add access
                   </button>
                 </form>
+                )}
               </div>
             </div>
           )}

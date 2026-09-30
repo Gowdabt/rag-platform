@@ -1,6 +1,7 @@
-.PHONY: up down logs test migrate api frontend lint bootstrap desktop desktop-dist frontend-build start stop restart
+.PHONY: up down logs test test-unit test-ftest test-ui test-all migrate api frontend lint bootstrap desktop desktop-dist frontend-build start stop restart
 
 COMPOSE = docker compose -f docker/docker-compose.yml
+PYTEST = PYTHONPATH=backend RAG_CONFIG_DIR=configs backend/.venv/bin/pytest
 
 up:
 	$(COMPOSE) up --build
@@ -30,8 +31,19 @@ restart:
 migrate:
 	cd backend && RAG_CONFIG_DIR=../configs .venv/bin/alembic upgrade head
 
+test-unit:
+	$(PYTEST) tests/unit -q --tb=short -m unit
+
+test-ftest:
+	$(PYTEST) tests/security tests/integration -q --tb=short -m "ftest or integration"
+
+test-ui:
+	cd frontend && npm run test:ui
+
 test:
-	PYTHONPATH=backend RAG_CONFIG_DIR=configs backend/.venv/bin/pytest tests -q
+	$(PYTEST) tests -q --tb=short
+
+test-all: test test-ui
 
 bootstrap:
 	bash scripts/bootstrap-local.sh

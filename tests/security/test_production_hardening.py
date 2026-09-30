@@ -75,9 +75,16 @@ def test_production_runtime_safety(monkeypatch):
     monkeypatch.delenv("RAG_ALLOW_PUBLIC_SIGNUP", raising=False)
     monkeypatch.setenv("RAG_ALLOW_PUBLIC_SIGNUP", "0")
     monkeypatch.setenv("JWT_SECRET", "a" * 40)
+    monkeypatch.delenv("EMAIL_PROVIDER", raising=False)
     data = load_yaml_layers("development")
     data["platform"]["environment"] = "production"
     data["http"] = {"cors_origins": ["*"]}
+    data["email"] = {
+        "provider": "smtp",
+        "from_address": "no-reply@example.com",
+        "public_app_url": "https://app.example",
+        "smtp_host": "smtp.example.com",
+    }
     settings = parse_settings(data)
     with pytest.raises(RuntimeSafetyError):
         enforce_runtime_safety(settings)

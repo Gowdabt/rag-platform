@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { docs } from "../api/client";
+import { asList, docs } from "../api/client";
+import { hasAnyPermission } from "../auth/access";
+import { useCurrentUser } from "../auth/CurrentUserContext";
 import { untrustedText } from "../security/untrusted";
 
 type Doc = {
@@ -24,6 +26,8 @@ type Version = {
 };
 
 export default function DocumentsPage() {
+  const user = useCurrentUser();
+  const canUpload = hasAnyPermission(user, ["document:write", "documents.upload"]);
   const [items, setItems] = useState<Doc[]>([]);
   const [status, setStatus] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -31,7 +35,7 @@ export default function DocumentsPage() {
   const [query, setQuery] = useState("");
 
   async function refresh() {
-    setItems(await docs.list());
+    setItems(asList<Doc>(await docs.list()));
   }
 
   useEffect(() => {
@@ -90,6 +94,7 @@ export default function DocumentsPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
+          {canUpload && (
           <label className="btn btn-primary cursor-pointer">
             Upload document
             <input
@@ -101,6 +106,7 @@ export default function DocumentsPage() {
               }}
             />
           </label>
+          )}
         </div>
       </div>
 
@@ -114,7 +120,7 @@ export default function DocumentsPage() {
       {status && <p className="text-sm text-on-surface">{status}</p>}
 
       <div className="panel">
-        <div className="table-head grid-cols-[2fr_1fr_auto_auto_auto]">
+        <div className="data-head cols-5">
           <span>Document</span>
           <span>Path</span>
           <span>Version</span>
@@ -123,8 +129,8 @@ export default function DocumentsPage() {
         </div>
         <ul>
           {visible.map((d) => (
-            <li key={d.id} className="border-b border-outline-variant/30 px-4 py-3 last:border-0 hover:bg-background">
-              <div className="grid grid-cols-[2fr_1fr_auto_auto_auto] items-center gap-3 text-[13px]">
+            <li key={d.id}>
+              <div className="data-row cols-5">
                 <div>
                   <div className="font-medium">{untrustedText(d.title)}</div>
                   <button
@@ -143,7 +149,7 @@ export default function DocumentsPage() {
                 </span>
               </div>
               {openId === d.id && (
-                <ul className="mt-2 space-y-1 rounded-lg bg-surface-low px-3 py-2 text-[12px] text-on-variant">
+                <ul className="space-y-1 bg-surface-low px-4 py-2 text-[12px] text-on-variant">
                   {(versions[d.id] || []).map((v) => (
                     <li key={v.id}>
                       v{v.version_number} · {v.status}
@@ -160,6 +166,7 @@ export default function DocumentsPage() {
         </ul>
       </div>
 
+      {canUpload && (
       <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-outline-variant bg-surface-low/50 px-6 py-10 text-sm text-on-variant hover:border-secondary">
         <span className="font-medium text-on-surface">Drag and drop files here, or click to browse</span>
         <span className="mt-1 text-[12px]">
@@ -177,6 +184,7 @@ export default function DocumentsPage() {
           }}
         />
       </label>
+      )}
     </section>
   );
 }

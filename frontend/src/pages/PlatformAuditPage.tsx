@@ -43,9 +43,7 @@ export function AuditTable({ rows, showTenant }: { rows: AuditRow[]; showTenant?
   return (
     <div className="panel">
       <div
-        className={`grid gap-3 border-b border-outline-variant/40 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-on-variant ${
-          showTenant ? "grid-cols-[1.4fr_1fr_1fr_auto]" : "grid-cols-[1.6fr_1fr_auto]"
-        }`}
+        className={`data-head ${showTenant ? "cols-audit-4" : "cols-audit-3"}`}
       >
         <span>Action</span>
         <span>Actor</span>
@@ -56,9 +54,7 @@ export function AuditTable({ rows, showTenant }: { rows: AuditRow[]; showTenant?
         {rows.map((row, i) => (
           <li
             key={row.id || `${row.action}-${i}`}
-            className={`grid gap-3 border-b border-outline-variant/30 px-4 py-3 text-[13px] last:border-0 ${
-              showTenant ? "grid-cols-[1.4fr_1fr_1fr_auto]" : "grid-cols-[1.6fr_1fr_auto]"
-            }`}
+            className={`data-row ${showTenant ? "cols-audit-4" : "cols-audit-3"}`}
           >
             <span className="font-medium">{row.action || "—"}</span>
             <span className="truncate text-on-variant">{row.actor_email || row.actor || "—"}</span>

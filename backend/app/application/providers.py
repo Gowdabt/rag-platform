@@ -11,6 +11,9 @@ def load_providers() -> None:
     from app.adapters.providers.connectors import local_fs as _local_fs  # noqa: F401
     from app.adapters.providers.connectors import microsoft as _ms  # noqa: F401
     from app.adapters.providers.connectors import s3 as _s3_conn  # noqa: F401
+    from app.adapters.providers.email import console as _email_console  # noqa: F401
+    from app.adapters.providers.email import resend as _email_resend  # noqa: F401
+    from app.adapters.providers.email import smtp as _email_smtp  # noqa: F401
     from app.adapters.providers.embeddings import hashing as _hash  # noqa: F401
     from app.adapters.providers.embeddings import ollama as _emb  # noqa: F401
     from app.adapters.providers.llm import extractive as _ext  # noqa: F401

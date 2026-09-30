@@ -133,18 +133,43 @@ Open http://localhost:5173 (or http://127.0.0.1:5173). API: http://127.0.0.1:800
 
 ## Tests
 
-From the repo root (venv installed, `.env` loaded for integration tests that hit Postgres):
+Three layers from the repo root (venv installed; `.env` loaded for tests that hit Postgres):
+
+```bash
+make test-unit       # tests/unit
+make test-ftest      # tests/security + tests/integration (needs Postgres)
+make test-ui         # Playwright smoke against Vite + API
+make test            # all pytest
+make test-all        # pytest + Playwright
+```
+
+Equivalent pytest:
 
 ```bash
 PYTHONPATH=backend RAG_CONFIG_DIR=configs backend/.venv/bin/pytest tests -q --tb=short
 ```
 
-Lint: `make lint`. Frontend build: `cd frontend && npm ci && npm run build`. CI runs the same pytest and frontend build on GitHub Actions.
+UI tests read Super Admin credentials from `PLATFORM_SUPERADMIN_*` in `.env` (never commit them). Install the browser once: `cd frontend && npx playwright install chromium`.
+
+Lint: `make lint`. Frontend build: `cd frontend && npm ci && npm run build`. CI runs pytest and the frontend build on GitHub Actions (Playwright is local / `make test-ui`).
 
 ## Security notes
 
 - **Do not commit secrets.** `.env`, OAuth client secrets, JWT signing keys, cloud API keys, and MCP tokens stay local. Commit `.env.example` placeholders only.
-- **Production is fail-closed.** `enforce_runtime_safety` refuses to start if the JWT secret is missing/short/placeholder, public signup is on, or CORS is `*`.
+- **Production is fail-closed.** `enforce_runtime_safety` refuses to start if the JWT secret is missing/short/placeholder, public signup is on, CORS is `*`, or email is still `console` / missing SMTP/Resend settings.
+- **Password reset does not return tokens.** `POST /api/v1/auth/forgot-password` always returns a generic `{ "ok": true }`. The reset URL is sent only by the configured email provider.
+
+## Email
+
+Transactional mail (password reset, tenant welcome, invitations, password-changed) goes through `EmailService` → a registered `EmailProvider`. Business logic never imports SMTP/Resend.
+
+| Provider | When |
+| --- | --- |
+| `console` | Local/dev/tests. Captures mail in-process. **Forbidden in production.** |
+| `smtp` | Self-hosted production (stdlib SMTP). |
+| `resend` | HTTPS API (`RESEND_API_KEY`). Pattern for other HTTP vendors. |
+
+Set `EMAIL_PROVIDER` and `PUBLIC_APP_URL` (the UI origin used in links). SMTP needs `SMTP_HOST` (and usually username/password). Do not commit real keys. Tenant Admin **Copy invite** still re-issues a link as an authenticated fallback.
 - Connector tokens are encrypted. Admin config endpoints redact secret-shaped keys.
 - Empty ACL = deny. Retrieval never sends unauthorized chunks to the LLM.
 - Prompt-injection tests treat document text as untrusted data; that is defense-in-depth, not a formal sandbox.

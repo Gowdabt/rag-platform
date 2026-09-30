@@ -100,6 +100,18 @@ auth:
 queue:
   provider: taskiq_redis
 
+email:
+  provider: console
+  from_name: RAG Platform
+  from_address: no-reply@localhost
+  public_app_url: http://localhost:5173
+  smtp_host: ""
+  smtp_port: 587
+  smtp_username: ""
+  smtp_password: ""
+  smtp_secure: true
+  api_key: ""
+
 observability:
   log_level: INFO
   otel_enabled: false

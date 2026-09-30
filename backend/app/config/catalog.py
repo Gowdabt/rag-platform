@@ -73,6 +73,7 @@ KNOWN_PROVIDERS: dict[str, frozenset[str]] = {
     "ocr": frozenset({"tesseract", "none"}),
     "memory": frozenset({"postgres", "none"}),
     "auth": frozenset({"password", "oidc"}),
+    "email": frozenset({"console", "smtp", "resend"}),
 }
 
 PROVIDER_CONFIG_FIELDS: dict[str, str] = {
@@ -87,4 +88,5 @@ PROVIDER_CONFIG_FIELDS: dict[str, str] = {
     "ocr": "ocr",
     "memory": "memory",
     "auth": "auth",
+    "email": "email",
 }

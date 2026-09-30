@@ -27,6 +27,7 @@ from app.adapters.db.models import (
 from app.adapters.db.rls import apply_rls_ids
 from app.application.audit import write_audit
 from app.application.authz_epoch import persist_authz_bump
+from app.application.email_service import EmailService, app_links, invite_url, reset_url
 from app.application.rbac import SEED_ROLES, SYSTEM_ROLES
 from app.config.models import PlatformSettings
 from app.core.context import RequestContext
@@ -38,7 +39,7 @@ from app.core.errors import (
     ValidationFailedError,
 )
 from app.core.flags import expose_dev_tokens
-from app.core.permissions import TENANT_ADMIN_ROLE, is_tenant_admin, is_tenant_admin_name
+from app.core.permissions import TENANT_ADMIN_NAMES, TENANT_ADMIN_ROLE, is_tenant_admin, is_tenant_admin_name
 from app.core.security import (
     hash_password,
     hash_token,
@@ -54,6 +55,15 @@ _PLATFORM_AUDIT_ACTIONS = frozenset({"tenant.create", "tenant.suspend", "tenant.
 
 INVITE_TTL = timedelta(days=7)
 RESET_TTL = timedelta(hours=24)
+_DEMO_EMAIL_ATTEMPTS = 20
+
+
+def demo_seed_email(role_name: str, tenant_slug: str, *, n: int = 1) -> str:
+    """Unique-looking demo address: member@salesforce.demo, member-2@salesforce.demo, …"""
+    local = slugify(role_name)
+    if n > 1:
+        local = f"{local}-{n}"
+    return f"{local}@{tenant_slug}.demo"
 
 
 class IdentityService:
@@ -456,20 +466,23 @@ class IdentityService:
         for role in roles:
             if role.id not in existing_roles:
                 self.session.add(UserRole(tenant_id=ctx.tenant_id, user_id=user.id, role_id=role.id))
-        token = new_refresh_token()
-        invitation = Invitation(
-            tenant_id=ctx.require_tenant(),
-            email=email,
+        payload, token = await self._issue_invitation(
+            ctx,
+            user=user,
             name=name or user.display_name,
-            token_hash=hash_token(token),
-            purpose="invite",
-            expires_at=datetime.now(UTC) + INVITE_TTL,
-            invited_by=ctx.user_id,
-            role_ids=[str(r.id) for r in roles],
-            invited_user_id=user.id,
+            roles=roles,
+            always_return_token=False,
         )
-        self.session.add(invitation)
-        await self.session.flush()
+        tenant = await self.session.get(Tenant, ctx.require_tenant())
+        if tenant is not None:
+            await self._send_invitation_email(
+                tenant=tenant,
+                user=user,
+                invite_secret=token,
+                role_names=[role.name for role in roles],
+                inviter_id=ctx.user_id,
+            )
+        payload["message"] = "Invitation created. An email was sent if mail is configured; Tenant Admin can also copy a fresh invite until they accept."
         await write_audit(
             self.session,
             tenant_id=ctx.tenant_id,
@@ -481,13 +494,6 @@ class IdentityService:
             request_id=ctx.request_id,
         )
         log.info("invitation_created", email=email, tenant_id=str(ctx.tenant_id))
-        payload = {
-            "user_id": str(user.id),
-            "email": email,
-            "message": "Invitation created. Email sending is not configured; use invitation_token.",
-        }
-        if expose_dev_tokens(self.settings.platform.environment):
-            payload["invitation_token"] = token
         return payload
 
     async def accept_invite(self, *, token: str, password: str) -> dict:
@@ -555,6 +561,7 @@ class IdentityService:
         payload = {"ok": True}
         if tenant is None or user is None:
             return payload
+        await apply_rls_ids(self.session, tenant_id=tenant.id, user_id=user.id)
         membership = await self.session.scalar(
             select(TenantMembership).where(
                 TenantMembership.tenant_id == tenant.id, TenantMembership.user_id == user.id
@@ -563,6 +570,7 @@ class IdentityService:
         if membership is None:
             return payload
         token = new_refresh_token()
+        await self._expire_unused_resets(tenant_id=tenant.id, user_id=user.id)
         self.session.add(
             Invitation(
                 tenant_id=tenant.id,
@@ -577,8 +585,15 @@ class IdentityService:
             )
         )
         await self.session.flush()
-        if expose_dev_tokens(self.settings.platform.environment):
-            payload["reset_token"] = token
+        await self._deliver_email(
+            template="password_reset",
+            to=email,
+            data={
+                **self._mail_context(user_name=user.display_name, tenant=tenant),
+                "resetUrl": reset_url(self.settings, token, tenant.slug),
+                "expiresIn": "24 hours",
+            },
+        )
         return payload
 
     async def reset_password(self, *, token: str, password: str) -> dict:
@@ -593,7 +608,13 @@ class IdentityService:
             raise ValidationFailedError("Reset token has expired")
         user = await self.session.get(User, row.invited_user_id) if row.invited_user_id else None
         if user is None:
+            user = await self.session.scalar(select(User).where(User.email == row.email))
+        if user is None:
             raise NotFoundError("User not found")
+        tenant = await self.session.get(Tenant, row.tenant_id)
+        if tenant is None or tenant.status != "active":
+            raise ForbiddenError("Tenant is not active")
+        await apply_rls_ids(self.session, tenant_id=tenant.id, user_id=user.id)
         user.password_hash = hash_password(password)
         if user.status == "invited":
             user.status = "active"
@@ -611,11 +632,17 @@ class IdentityService:
         for item in tokens:
             item.revoked_at = now
         await self.session.flush()
+        await self._deliver_email(
+            template="password_changed",
+            to=user.email,
+            data=self._mail_context(user_name=user.display_name, tenant=tenant),
+        )
         return {"ok": True}
 
     async def list_users(self, ctx: RequestContext, *, limit: int = 100, offset: int = 0) -> list[dict]:
         from app.api.pagination import clip_limit, clip_offset
 
+        ctx.require_tenant()
         memberships = (
             await self.session.scalars(
                 select(TenantMembership)
@@ -649,7 +676,9 @@ class IdentityService:
         user_id: UUID,
         *,
         status: str | None = None,
+        name: str | None = None,
         role_ids: list[UUID] | None = None,
+        role_names: list[str] | None = None,
     ) -> dict:
         membership = await self.session.scalar(
             select(TenantMembership).where(
@@ -659,26 +688,47 @@ class IdentityService:
         user = await self.session.get(User, user_id)
         if membership is None or user is None:
             raise NotFoundError("User not found")
+        if name is not None:
+            if not ctx.has("users.update"):
+                raise ForbiddenError("Missing permission users.update")
+            trimmed = name.strip()
+            if not trimmed:
+                raise ValidationFailedError("name is required")
+            user.display_name = trimmed
         if status is not None:
             if not ctx.has("users.disable") and not ctx.has("users.update"):
                 raise ForbiddenError("Missing permission users.disable")
             if status not in {"active", "disabled"}:
                 raise ValidationFailedError("status must be active or disabled")
+            if status == "disabled" and await self._is_last_active_tenant_admin(ctx.require_tenant(), user_id):
+                raise ConflictError("Cannot disable the last Tenant Admin")
             user.status = status
             if status == "disabled":
                 await self._revoke_user_sessions(user_id, tenant_id=ctx.tenant_id)
                 await persist_authz_bump(self.session, ctx.require_tenant(), user_id)
             else:
                 await persist_authz_bump(self.session, ctx.require_tenant(), user_id)
-        if role_ids is not None:
-            if not ctx.has("roles.assign"):
-                raise ForbiddenError("Missing permission roles.assign")
-            roles = await self._resolve_roles(ctx, role_ids=role_ids, role_names=None, default_member=False)
+        if role_ids is not None or role_names is not None:
+            if not ctx.has("roles.assign") and not ctx.has("users.update"):
+                raise ForbiddenError("Missing permission users.update")
+            roles = await self._resolve_roles(
+                ctx, role_ids=role_ids, role_names=role_names, default_member=False
+            )
+            current_names = await self._user_role_names(ctx.require_tenant(), user.id)
+            if is_tenant_admin(current_names) and not is_tenant_admin([role.name for role in roles]):
+                if await self._is_last_active_tenant_admin(ctx.require_tenant(), user_id):
+                    raise ConflictError("Cannot remove the last Tenant Admin")
             await self.session.execute(
                 delete(UserRole).where(UserRole.tenant_id == ctx.tenant_id, UserRole.user_id == user_id)
             )
             for role in roles:
                 self.session.add(UserRole(tenant_id=ctx.tenant_id, user_id=user_id, role_id=role.id))
+            await self._update_pending_invite_metadata(
+                tenant_id=ctx.require_tenant(),
+                user_id=user.id,
+                name=user.display_name,
+                role_ids=[role.id for role in roles],
+            )
             await write_audit(
                 self.session,
                 tenant_id=ctx.tenant_id,
@@ -690,6 +740,13 @@ class IdentityService:
                 request_id=ctx.request_id,
             )
             await persist_authz_bump(self.session, ctx.require_tenant(), user_id)
+        elif name is not None:
+            await self._update_pending_invite_metadata(
+                tenant_id=ctx.require_tenant(),
+                user_id=user.id,
+                name=user.display_name,
+                role_ids=None,
+            )
         await self.session.flush()
         return {
             "id": str(user.id),
@@ -699,6 +756,50 @@ class IdentityService:
             "roles": await self._user_role_names(ctx.require_tenant(), user.id),
             "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         }
+
+    async def resend_invitation(self, ctx: RequestContext, user_id: UUID) -> dict:
+        if not ctx.has("users.create"):
+            raise ForbiddenError("Missing permission users.create")
+        membership = await self.session.scalar(
+            select(TenantMembership).where(
+                TenantMembership.tenant_id == ctx.tenant_id, TenantMembership.user_id == user_id
+            )
+        )
+        user = await self.session.get(User, user_id)
+        if membership is None or user is None:
+            raise NotFoundError("User not found")
+        if (user.status or "").lower() != "invited":
+            raise ValidationFailedError("User has already accepted their invitation", status_code=400)
+        roles = await self._roles_for_user(ctx.require_tenant(), user.id)
+        payload, token = await self._issue_invitation(
+            ctx,
+            user=user,
+            name=user.display_name,
+            roles=roles,
+            always_return_token=True,
+        )
+        tenant = await self.session.get(Tenant, ctx.require_tenant())
+        if tenant is not None:
+            await self._send_invitation_email(
+                tenant=tenant,
+                user=user,
+                invite_secret=token,
+                role_names=[role.name for role in roles],
+                inviter_id=ctx.user_id,
+            )
+        await write_audit(
+            self.session,
+            tenant_id=ctx.tenant_id,
+            actor_user_id=ctx.user_id,
+            action="user.invite_resend",
+            resource_type="user",
+            resource_id=user.id,
+            metadata={"email": user.email},
+            request_id=ctx.request_id,
+        )
+        log.info("invitation_resent", email=user.email, tenant_id=str(ctx.tenant_id))
+        payload["message"] = "Invitation re-issued. Previous unused invite links no longer work."
+        return payload
 
     async def revoke_sessions(self, ctx: RequestContext, user_id: UUID) -> dict:
         if not ctx.has("users.update") and not ctx.has("users.disable"):
@@ -722,10 +823,11 @@ class IdentityService:
     async def list_roles(self, ctx: RequestContext, *, limit: int = 100, offset: int = 0) -> list[dict]:
         from app.api.pagination import clip_limit, clip_offset
 
+        tenant_id = ctx.require_tenant()
         rows = (
             await self.session.scalars(
                 select(Role)
-                .where(Role.tenant_id == ctx.tenant_id)
+                .where(Role.tenant_id == tenant_id)
                 .order_by(Role.name, Role.id)
                 .offset(clip_offset(offset))
                 .limit(clip_limit(limit))
@@ -733,15 +835,8 @@ class IdentityService:
         ).all()
         out = []
         for role in rows:
-            out.append(
-                {
-                    "id": str(role.id),
-                    "name": role.name,
-                    "description": role.description,
-                    "is_system": role.is_system,
-                    "permission_codes": await self._role_permission_codes(ctx.require_tenant(), role.id),
-                }
-            )
+            codes = await self._role_permission_codes(tenant_id, role.id)
+            out.append(self._role_payload(role, codes))
         return out
 
     async def create_role(
@@ -779,13 +874,8 @@ class IdentityService:
             request_id=ctx.request_id,
         )
         await persist_authz_bump(self.session, ctx.require_tenant())
-        return {
-            "id": str(role.id),
-            "name": role.name,
-            "description": role.description,
-            "is_system": role.is_system,
-            "permission_codes": await self._role_permission_codes(ctx.require_tenant(), role.id),
-        }
+        codes = await self._role_permission_codes(ctx.require_tenant(), role.id)
+        return self._role_payload(role, codes)
 
     async def update_role(
         self,
@@ -813,6 +903,8 @@ class IdentityService:
         if description is not None:
             role.description = description
         if permission_codes is not None:
+            if role.is_system or is_tenant_admin_name(role.name):
+                raise ForbiddenError("Cannot change system role permissions")
             await self._set_role_permissions(ctx, role, permission_codes)
         await write_audit(
             self.session,
@@ -825,13 +917,8 @@ class IdentityService:
         )
         await persist_authz_bump(self.session, ctx.require_tenant())
         await self.session.flush()
-        return {
-            "id": str(role.id),
-            "name": role.name,
-            "description": role.description,
-            "is_system": role.is_system,
-            "permission_codes": await self._role_permission_codes(ctx.require_tenant(), role.id),
-        }
+        codes = await self._role_permission_codes(ctx.require_tenant(), role.id)
+        return self._role_payload(role, codes)
 
     async def delete_role(self, ctx: RequestContext, role_id: UUID) -> dict:
         if not ctx.has("roles.delete"):
@@ -938,7 +1025,58 @@ class IdentityService:
                 .limit(clip_limit(limit))
             )
         ).all()
-        return [self._tenant_payload(t) for t in rows]
+        payloads = [self._tenant_payload(t) for t in rows]
+        await self._attach_tenant_admins(payloads, [t.id for t in rows])
+        return payloads
+
+    async def get_platform_tenant(self, ctx: RequestContext, tenant_id: UUID) -> dict:
+        self._require_super_admin(ctx)
+        tenant = await self.session.get(Tenant, tenant_id)
+        if tenant is None:
+            raise NotFoundError("Tenant not found")
+        payload = self._tenant_payload(tenant)
+        await self._attach_tenant_admins([payload], [tenant.id])
+        return payload
+
+    async def _attach_tenant_admins(self, payloads: list[dict], tenant_ids: list[UUID]) -> None:
+        if not payloads or not tenant_ids:
+            return
+        admin_roles = (
+            await self.session.scalars(
+                select(Role).where(Role.tenant_id.in_(tenant_ids), Role.name.in_(tuple(TENANT_ADMIN_NAMES)))
+            )
+        ).all()
+        role_ids = [role.id for role in admin_roles]
+        if not role_ids:
+            return
+        assignments = (
+            await self.session.scalars(
+                select(UserRole).where(UserRole.tenant_id.in_(tenant_ids), UserRole.role_id.in_(role_ids))
+            )
+        ).all()
+        user_ids = [row.user_id for row in assignments]
+        users = (
+            (await self.session.scalars(select(User).where(User.id.in_(user_ids)))).all() if user_ids else []
+        )
+        user_by_id = {user.id: user for user in users}
+        chosen: dict[UUID, User] = {}
+        for row in assignments:
+            user = user_by_id.get(row.user_id)
+            if user is None:
+                continue
+            prev = chosen.get(row.tenant_id)
+            created = user.created_at or datetime.min.replace(tzinfo=UTC)
+            prev_created = prev.created_at if prev else None
+            if prev is None or created < (prev_created or datetime.min.replace(tzinfo=UTC)):
+                chosen[row.tenant_id] = user
+        by_id = {row["id"]: row for row in payloads}
+        for tenant_id, user in chosen.items():
+            row = by_id.get(str(tenant_id))
+            if row is None:
+                continue
+            row["admin_email"] = user.email
+            if user.display_name:
+                row["admin_name"] = user.display_name
 
     async def list_platform_audit_logs(
         self, ctx: RequestContext, *, limit: int = 100, offset: int = 0
@@ -1043,6 +1181,7 @@ class IdentityService:
         admin_name: str,
         admin_email: str,
         status: str | None = None,
+        admin_password: str | None = None,
     ) -> dict:
         self._require_super_admin(ctx)
         status = status or "active"
@@ -1050,26 +1189,38 @@ class IdentityService:
             raise ValidationFailedError("status must be active or suspended")
         admin_email = admin_email.strip().lower()
         slug = slugify(slug)
+        password = (admin_password or "").strip() or None
+        if password is not None and len(password) < 10:
+            raise ValidationFailedError("Temporary admin password must be at least 10 characters")
         if await self.session.scalar(select(Tenant).where(Tenant.slug == slug)):
             raise ConflictError("A tenant with that slug already exists")
         user = await self.session.scalar(select(User).where(User.email == admin_email))
         if user and user.is_super_admin:
             raise ForbiddenError("Super admin cannot be a tenant admin")
+        password_set = False
         if user is None:
             user = User(
                 email=admin_email,
-                password_hash=None,
-                status="invited",
+                password_hash=hash_password(password) if password else None,
+                status="active" if password else "invited",
                 is_super_admin=False,
                 display_name=admin_name,
             )
             self.session.add(user)
             await self.session.flush()
+            password_set = password is not None
+        elif password and not user.password_hash:
+            user.password_hash = hash_password(password)
+            user.status = "active"
+            if admin_name:
+                user.display_name = admin_name
+            password_set = True
         tenant = await self._create_tenant_graph(name=name, slug=slug, admin_user=user)
         tenant.status = status
         await apply_rls_ids(self.session, tenant_id=tenant.id, user_id=ctx.user_id)
         admin_role = await self._role_by_name(tenant.id, TENANT_ADMIN_ROLE)
         token = new_refresh_token()
+        expires_at = datetime.now(UTC) + INVITE_TTL
         self.session.add(
             Invitation(
                 tenant_id=tenant.id,
@@ -1077,7 +1228,7 @@ class IdentityService:
                 name=admin_name,
                 token_hash=hash_token(token),
                 purpose="invite",
-                expires_at=datetime.now(UTC) + INVITE_TTL,
+                expires_at=expires_at,
                 invited_by=ctx.user_id,
                 role_ids=[str(admin_role.id)] if admin_role else [],
                 invited_user_id=user.id,
@@ -1090,17 +1241,62 @@ class IdentityService:
             action="tenant.create",
             resource_type="tenant",
             resource_id=tenant.id,
-            metadata={"slug": tenant.slug, "admin_email": admin_email},
+            metadata={"slug": tenant.slug, "admin_email": admin_email, "password_set": password_set},
             request_id=ctx.request_id,
         )
         await self.session.flush()
         log.info("platform_tenant_invite", email=admin_email, slug=tenant.slug)
+        admin_entry = self._seeded_user_payload(
+            role=admin_role.name if admin_role else TENANT_ADMIN_ROLE,
+            email=admin_email,
+            name=admin_name,
+            status=user.status,
+            expires_at=expires_at,
+            invite_secret=token,
+            is_demo=False,
+            user_id=user.id,
+        )
+        demo_users = await self._create_seed_role_demo_users(
+            ctx,
+            tenant=tenant,
+            claimed_emails={admin_email},
+            expires_at=expires_at,
+        )
+        seeded_users = [admin_entry, *demo_users]
+        setup = (
+            "You can sign in with tenant ID, your email, and the temporary password that was set."
+            if password_set
+            else "Open the invitation link in this email and choose a password before signing in."
+        )
+        await self._deliver_email(
+            template="tenant_welcome",
+            to=admin_email,
+            data={
+                **self._mail_context(user_name=admin_name, tenant=tenant),
+                "setupInstructions": setup,
+                "inviteUrl": invite_url(self.settings, token) if not password_set else app_links(self.settings)["loginUrl"],
+                "expiresIn": "7 days",
+            },
+        )
+        tenant_body = self._tenant_payload(tenant)
+        tenant_body["admin_email"] = admin_email
+        tenant_body["admin_name"] = admin_name
         payload = {
-            "tenant": self._tenant_payload(tenant),
-            "message": "Invitation created. Email sending is not configured; use invitation_token.",
+            "tenant": tenant_body,
+            "slug": tenant.slug,
+            "admin_email": admin_email,
+            "password_set": password_set,
+            "invitation_expires_at": expires_at.isoformat(),
+            "seeded_users": seeded_users,
+            "message": (
+                "Tenant Admin can sign in with tenant ID, email, and the temporary password."
+                if password_set
+                else "No password was set. Tenant Admin must open the invite link and choose a password before signing in."
+            ),
         }
         if expose_dev_tokens(self.settings.platform.environment):
             payload["invitation_token"] = token
+            payload["invite_path"] = f"/invite?token={token}"
         return payload
 
     async def patch_platform_tenant(
@@ -1176,6 +1372,7 @@ class IdentityService:
         return {
             "id": str(tenant.id),
             "name": tenant.name,
+            "company_name": tenant.name,
             "slug": tenant.slug,
             "status": tenant.status,
             "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
@@ -1254,6 +1451,122 @@ class IdentityService:
         await self.session.flush()
         return tenant
 
+    def _seeded_user_payload(
+        self,
+        *,
+        role: str,
+        email: str,
+        name: str,
+        status: str,
+        expires_at: datetime,
+        invite_secret: str | None,
+        is_demo: bool,
+        user_id: UUID | None = None,
+    ) -> dict:
+        payload: dict = {
+            "role": role,
+            "email": email,
+            "name": name,
+            "status": status,
+            "is_demo": is_demo,
+            "invitation_expires_at": expires_at.isoformat(),
+        }
+        if user_id is not None:
+            payload["user_id"] = str(user_id)
+        if invite_secret and expose_dev_tokens(self.settings.platform.environment):
+            payload["invitation_token"] = invite_secret
+            payload["invite_path"] = f"/invite?token={invite_secret}"
+        return payload
+
+    async def _allocate_demo_email(self, role_name: str, tenant_slug: str, claimed: set[str]) -> str | None:
+        for n in range(1, _DEMO_EMAIL_ATTEMPTS + 1):
+            email = demo_seed_email(role_name, tenant_slug, n=n)
+            if email in claimed:
+                continue
+            taken = await self.session.scalar(select(User.id).where(User.email == email))
+            if taken is None:
+                return email
+        return None
+
+    async def _create_seed_role_demo_users(
+        self,
+        ctx: RequestContext,
+        *,
+        tenant: Tenant,
+        claimed_emails: set[str],
+        expires_at: datetime,
+    ) -> list[dict]:
+        workspace = await self.session.scalar(
+            select(Workspace).where(Workspace.tenant_id == tenant.id).order_by(Workspace.created_at)
+        )
+        seeded: list[dict] = []
+        claimed = {email.strip().lower() for email in claimed_emails}
+        for role_name in SEED_ROLES:
+            if is_tenant_admin_name(role_name):
+                continue
+            role = await self._role_by_name(tenant.id, role_name)
+            if role is None:
+                log.warning("seed_demo_user_skipped_missing_role", role=role_name, slug=tenant.slug)
+                continue
+            email = await self._allocate_demo_email(role_name, tenant.slug, claimed)
+            if email is None:
+                log.warning("seed_demo_user_skipped_email", role=role_name, slug=tenant.slug)
+                continue
+            claimed.add(email)
+            display_name = f"{role_name} (demo)"
+            user = User(
+                email=email,
+                password_hash=None,
+                status="invited",
+                is_super_admin=False,
+                display_name=display_name,
+            )
+            self.session.add(user)
+            await self.session.flush()
+            self.session.add(
+                TenantMembership(
+                    tenant_id=tenant.id,
+                    user_id=user.id,
+                    default_workspace_id=workspace.id if workspace else None,
+                )
+            )
+            self.session.add(UserRole(tenant_id=tenant.id, user_id=user.id, role_id=role.id))
+            token = new_refresh_token()
+            self.session.add(
+                Invitation(
+                    tenant_id=tenant.id,
+                    email=email,
+                    name=display_name,
+                    token_hash=hash_token(token),
+                    purpose="invite",
+                    expires_at=expires_at,
+                    invited_by=ctx.user_id,
+                    role_ids=[str(role.id)],
+                    invited_user_id=user.id,
+                )
+            )
+            await self._send_invitation_email(
+                tenant=tenant,
+                user=user,
+                invite_secret=token,
+                role_names=[role.name],
+                inviter_id=ctx.user_id,
+            )
+            seeded.append(
+                self._seeded_user_payload(
+                    role=role.name,
+                    email=email,
+                    name=display_name,
+                    status="invited",
+                    expires_at=expires_at,
+                    invite_secret=token,
+                    is_demo=True,
+                    user_id=user.id,
+                )
+            )
+        await self.session.flush()
+        return seeded
+
     async def _role_by_name(self, tenant_id: UUID, name: str) -> Role | None:
         if is_tenant_admin_name(name):
             row = await self.session.scalar(
@@ -1299,8 +1612,21 @@ class IdentityService:
                 raise ForbiddenError("Only tenant admins can assign Tenant Admin")
         return found
 
+    def _role_payload(self, role: Role, codes: list[str]) -> dict:
+        return {
+            "id": str(role.id),
+            "name": role.name,
+            "description": role.description,
+            "is_system": role.is_system,
+            "permission_codes": codes,
+            "permissions": codes,
+        }
+
     async def _set_role_permissions(self, ctx: RequestContext, role: Role, permission_codes: list[str]) -> None:
         codes = [c.strip() for c in permission_codes if c and c.strip()]
+        for code in codes:
+            if not ctx.has(code):
+                raise ForbiddenError(f"Cannot grant permission {code}")
         await self.session.execute(delete(RolePermission).where(RolePermission.role_id == role.id))
         if not codes:
             return
@@ -1347,6 +1673,210 @@ class IdentityService:
             await self.session.scalars(select(Role).where(Role.id.in_(role_ids), Role.tenant_id == tenant_id))
         ).all()
         return [r.name for r in rows]
+
+    async def _roles_for_user(self, tenant_id: UUID, user_id: UUID) -> list[Role]:
+        role_ids = [
+            ur.role_id
+            for ur in (
+                await self.session.scalars(
+                    select(UserRole).where(UserRole.tenant_id == tenant_id, UserRole.user_id == user_id)
+                )
+            ).all()
+        ]
+        if not role_ids:
+            return []
+        return list(
+            (
+                await self.session.scalars(
+                    select(Role).where(Role.id.in_(role_ids), Role.tenant_id == tenant_id)
+                )
+            ).all()
+        )
+
+    async def _count_active_tenant_admins(self, tenant_id: UUID, *, exclude_user_id: UUID | None = None) -> int:
+        role_ids = [
+            role.id
+            for role in (
+                await self.session.scalars(
+                    select(Role).where(Role.tenant_id == tenant_id, Role.name.in_(tuple(TENANT_ADMIN_NAMES)))
+                )
+            ).all()
+        ]
+        if not role_ids:
+            return 0
+        user_ids = {
+            row.user_id
+            for row in (
+                await self.session.scalars(
+                    select(UserRole).where(UserRole.tenant_id == tenant_id, UserRole.role_id.in_(role_ids))
+                )
+            ).all()
+        }
+        count = 0
+        for uid in user_ids:
+            if exclude_user_id is not None and uid == exclude_user_id:
+                continue
+            user = await self.session.get(User, uid)
+            if user is None or (user.status or "").lower() != "active":
+                continue
+            membership = await self.session.scalar(
+                select(TenantMembership).where(
+                    TenantMembership.tenant_id == tenant_id, TenantMembership.user_id == uid
+                )
+            )
+            if membership:
+                count += 1
+        return count
+
+    async def _is_last_active_tenant_admin(self, tenant_id: UUID, user_id: UUID) -> bool:
+        user = await self.session.get(User, user_id)
+        if user is None or (user.status or "").lower() != "active":
+            return False
+        names = await self._user_role_names(tenant_id, user_id)
+        if not is_tenant_admin(names):
+            return False
+        return await self._count_active_tenant_admins(tenant_id, exclude_user_id=user_id) == 0
+
+    async def _expire_unused_invites(self, *, tenant_id: UUID, user_id: UUID) -> None:
+        now = datetime.now(UTC)
+        rows = (
+            await self.session.scalars(
+                select(Invitation).where(
+                    Invitation.tenant_id == tenant_id,
+                    Invitation.purpose == "invite",
+                    Invitation.accepted_at.is_(None),
+                    Invitation.invited_user_id == user_id,
+                )
+            )
+        ).all()
+        for row in rows:
+            if row.expires_at > now:
+                row.expires_at = now - timedelta(seconds=1)
+
+    async def _update_pending_invite_metadata(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        name: str | None,
+        role_ids: list[UUID] | None,
+    ) -> None:
+        rows = (
+            await self.session.scalars(
+                select(Invitation).where(
+                    Invitation.tenant_id == tenant_id,
+                    Invitation.purpose == "invite",
+                    Invitation.accepted_at.is_(None),
+                    Invitation.invited_user_id == user_id,
+                )
+            )
+        ).all()
+        for row in rows:
+            if name is not None:
+                row.name = name
+            if role_ids is not None:
+                row.role_ids = [str(rid) for rid in role_ids]
+
+    async def _issue_invitation(
+        self,
+        ctx: RequestContext,
+        *,
+        user: User,
+        name: str | None,
+        roles: list[Role],
+        always_return_token: bool,
+    ) -> tuple[dict, str]:
+        """Create a hashed invite. Plaintext token is returned once and never persisted."""
+        tenant_id = ctx.require_tenant()
+        await self._expire_unused_invites(tenant_id=tenant_id, user_id=user.id)
+        token = new_refresh_token()
+        expires_at = datetime.now(UTC) + INVITE_TTL
+        self.session.add(
+            Invitation(
+                tenant_id=tenant_id,
+                email=user.email,
+                name=name or user.display_name,
+                token_hash=hash_token(token),
+                purpose="invite",
+                expires_at=expires_at,
+                invited_by=ctx.user_id,
+                role_ids=[str(role.id) for role in roles],
+                invited_user_id=user.id,
+            )
+        )
+        await self.session.flush()
+        payload = {
+            "user_id": str(user.id),
+            "email": user.email,
+            "invitation_expires_at": expires_at.isoformat(),
+            "message": "Invitation created. An email was sent if mail is configured.",
+        }
+        if always_return_token or expose_dev_tokens(self.settings.platform.environment):
+            payload["invitation_token"] = token
+            payload["invite_path"] = f"/invite?token={token}"
+        return payload, token
+
+    async def _expire_unused_resets(self, *, tenant_id: UUID, user_id: UUID) -> None:
+        now = datetime.now(UTC)
+        rows = (
+            await self.session.scalars(
+                select(Invitation).where(
+                    Invitation.tenant_id == tenant_id,
+                    Invitation.purpose == "reset",
+                    Invitation.accepted_at.is_(None),
+                    Invitation.invited_user_id == user_id,
+                )
+            )
+        ).all()
+        for row in rows:
+            if row.expires_at > now:
+                row.expires_at = now - timedelta(seconds=1)
+
+    def _mail_context(self, *, user_name: str | None, tenant: Tenant) -> dict[str, str]:
+        links = app_links(self.settings)
+        return {
+            **links,
+            "userName": (user_name or "").strip() or "there",
+            "tenantName": tenant.name,
+            "tenantSlug": tenant.slug,
+        }
+
+    async def _inviter_name(self, user_id: UUID | None) -> str:
+        if user_id is None:
+            return "Your administrator"
+        actor = await self.session.get(User, user_id)
+        if actor is None:
+            return "Your administrator"
+        if actor.is_super_admin:
+            return "Platform Super Admin"
+        return (actor.display_name or actor.email or "Your administrator").strip()
+
+    async def _send_invitation_email(
+        self,
+        *,
+        tenant: Tenant,
+        user: User,
+        invite_secret: str,
+        role_names: list[str],
+        inviter_id: UUID | None,
+    ) -> None:
+        await self._deliver_email(
+            template="user_invitation",
+            to=user.email,
+            data={
+                **self._mail_context(user_name=user.display_name, tenant=tenant),
+                "inviterName": await self._inviter_name(inviter_id),
+                "roleName": ", ".join(role_names) or "Member",
+                "inviteUrl": invite_url(self.settings, invite_secret),
+                "expiresIn": "7 days",
+            },
+        )
+
+    async def _deliver_email(self, *, template: str, to: str, data: dict[str, str]) -> None:
+        try:
+            await EmailService(self.settings).send(template=template, to=to, data=data)
+        except Exception:
+            log.warning("email_deliver_failed", template=template)
 
     async def _revoke_user_sessions(self, user_id: UUID, *, tenant_id: UUID | None) -> int:
         rows = (

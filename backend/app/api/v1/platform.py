@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, EmailStr
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.db.rls import apply_rls
@@ -13,14 +14,43 @@ from app.application.identity import IdentityService
 from app.application.tenant_ai import catalog_llm_entries
 from app.config.models import PlatformSettings
 from app.core.context import RequestContext
+from app.core.text import slugify
+
+_SLUG_HAS_ALNUM = re.compile(r"[a-z0-9]", re.I)
 
 
 class PlatformTenantIn(BaseModel):
-    name: str
-    slug: str
-    admin_name: str
+    model_config = ConfigDict(populate_by_name=True)
+    name: str = Field(min_length=1, validation_alias=AliasChoices("name", "company_name"))
+    slug: str = Field(min_length=1, validation_alias=AliasChoices("slug", "tenant_id"))
+    admin_name: str = Field(min_length=1)
     admin_email: EmailStr
+    admin_password: str | None = Field(default=None, min_length=10)
     status: str | None = None
+
+    @field_validator("name", "admin_name")
+    @classmethod
+    def strip_required(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("cannot be empty")
+        return text
+
+    @field_validator("slug")
+    @classmethod
+    def normalize_slug(cls, value: str) -> str:
+        if not _SLUG_HAS_ALNUM.search(value):
+            raise ValueError("slug must include letters or digits")
+        return slugify(value)
+
+    @field_validator("admin_password", mode="before")
+    @classmethod
+    def empty_password_none(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class PlatformTenantPatch(BaseModel):
@@ -63,8 +93,19 @@ async def create_tenant(
         slug=body.slug,
         admin_name=body.admin_name,
         admin_email=str(body.admin_email),
+        admin_password=body.admin_password,
         status=body.status,
     )
+
+
+@router.get("/tenants/{tenant_id}")
+async def get_tenant(
+    tenant_id: UUID,
+    ctx: RequestContext = Depends(require_super_admin),
+    settings: PlatformSettings = Depends(get_settings),
+    session: AsyncSession = Depends(_db),
+):
+    return await IdentityService(session, settings).get_platform_tenant(ctx, tenant_id)
 
 
 @router.patch("/tenants/{tenant_id}")

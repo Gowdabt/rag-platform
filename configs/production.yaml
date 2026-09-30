@@ -1,6 +1,11 @@
 platform:
   environment: production
 
+email:
+  provider: smtp
+  from_address: no-reply@example.com
+  public_app_url: https://example.com
+
 observability:
   log_level: INFO
   otel_enabled: true

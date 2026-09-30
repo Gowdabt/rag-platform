@@ -1,6 +1,7 @@
 from app.domain.ports.auth import AuthProvider
 from app.domain.ports.chunker import Chunker
 from app.domain.ports.connector import DataSourceConnector
+from app.domain.ports.email import EmailProvider
 from app.domain.ports.embeddings import EmbeddingProvider
 from app.domain.ports.llm import LLMProvider
 from app.domain.ports.memory import MemoryStore
@@ -17,6 +18,7 @@ __all__ = [
     "Chunker",
     "DataSourceConnector",
     "DocumentParser",
+    "EmailProvider",
     "EmbeddingProvider",
     "JobQueue",
     "LLMProvider",

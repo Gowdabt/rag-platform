@@ -21,15 +21,25 @@ class InviteIn(BaseModel):
 
 
 class InvitationIn(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     email: EmailStr
     name: str | None = None
     role_ids: list[UUID] | None = None
-    role_names: list[str] | None = None
+    role_names: list[str] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("role_names", "roles"),
+    )
 
 
 class UserPatchIn(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     status: str | None = None
+    name: str | None = None
     role_ids: list[UUID] | None = None
+    role_names: list[str] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("role_names", "roles"),
+    )
 
 
 class RoleIn(BaseModel):
@@ -130,8 +140,23 @@ async def patch_user(
     session: AsyncSession = Depends(_db),
 ):
     return await IdentityService(session, settings).update_user(
-        ctx, user_id, status=body.status, role_ids=body.role_ids
+        ctx,
+        user_id,
+        status=body.status,
+        name=body.name,
+        role_ids=body.role_ids,
+        role_names=body.role_names,
     )
+
+
+@router.post("/users/{user_id}/resend-invite")
+async def resend_invite(
+    user_id: UUID,
+    ctx: RequestContext = Depends(require_any_permission("users.create", "user:manage")),
+    settings: PlatformSettings = Depends(get_settings),
+    session: AsyncSession = Depends(_db),
+):
+    return await IdentityService(session, settings).resend_invitation(ctx, user_id)
 
 
 @router.post("/users/{user_id}/revoke-sessions")

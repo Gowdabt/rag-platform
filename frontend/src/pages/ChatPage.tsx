@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { adminApi, chatApi } from "../api/client";
+import { adminApi, asList, chatApi } from "../api/client";
 import { untrustedText } from "../security/untrusted";
 
 type Citation = {
@@ -38,12 +38,12 @@ export default function ChatPage() {
   const pendingRef = useRef(false);
 
   async function refreshConversations() {
-    const rows = await chatApi.conversations();
+    const rows = asList<Conversation>(await chatApi.conversations());
     setConversations(rows);
   }
 
   async function loadConversation(id: string) {
-    const rows = await chatApi.messages(id);
+    const rows = asList<ChatMessage>(await chatApi.messages(id));
     setMessages(
       rows.map((m: ChatMessage) => ({
         id: m.id,
@@ -59,7 +59,8 @@ export default function ChatPage() {
   useEffect(() => {
     chatApi
       .conversations()
-      .then((rows: Conversation[]) => {
+      .then((data) => {
+        const rows = asList<Conversation>(data);
         setConversations(rows);
         const stored = localStorage.getItem(CONV_KEY);
         if (stored && rows.some((c) => c.id === stored)) {
@@ -207,8 +208,8 @@ export default function ChatPage() {
   const active = conversations.find((c) => c.id === conversationId);
 
   return (
-    <section className="flex min-h-[calc(100vh-8.5rem)] flex-1 overflow-hidden rounded-xl bg-surface-lowest shadow-card">
-      <aside className="flex w-64 shrink-0 flex-col bg-surface-lowest">
+    <section className="flex min-h-[calc(100vh-8.5rem)] flex-1 flex-col overflow-hidden rounded-xl bg-surface-lowest shadow-card md:flex-row">
+      <aside className="flex max-h-48 w-full shrink-0 flex-col bg-surface-lowest md:max-h-none md:w-64">
         <div className="flex h-14 items-center justify-between bg-surface-low/40 px-4">
           <h1 className="text-headline-sm">Conversations</h1>
           <div className="flex items-center gap-1">
@@ -247,7 +248,7 @@ export default function ChatPage() {
                 type="button"
                 aria-label={`Delete ${untrustedText(c.title || "conversation")}`}
                 title="Delete"
-                className="shrink-0 rounded-md p-1.5 text-on-variant opacity-0 hover:bg-error-container/40 hover:text-on-error-container group-hover:opacity-100"
+                className="shrink-0 rounded-md p-1.5 text-on-variant hover:bg-error-container/40 hover:text-on-error-container md:opacity-0 md:group-hover:opacity-100"
                 onClick={(e) => {
                   e.stopPropagation();
                   deleteConversation(c.id);

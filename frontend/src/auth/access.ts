@@ -6,6 +6,67 @@ export type NavLinkItem = {
   end?: boolean;
 };
 
+const PLATFORM_CODES = new Set([
+  "platform.tenants.view",
+  "platform.tenants.create",
+  "platform.tenants.update",
+  "platform.ai_catalog.view",
+]);
+
+const EQUIVALENTS: Record<string, string[]> = {
+  "document:read": ["documents.view"],
+  "documents.view": ["document:read"],
+  "document:write": ["documents.upload"],
+  "documents.upload": ["document:write"],
+  "document:delete": ["documents.delete"],
+  "documents.delete": ["document:delete"],
+  "audit:read": ["audit.view"],
+  "audit.view": ["audit:read"],
+  "conversation:write": ["ai.chat"],
+  "ai.chat": ["conversation:write"],
+};
+
+const GRANTS: Record<string, string[]> = {
+  "user:manage": [
+    "users.view",
+    "users.create",
+    "users.update",
+    "users.disable",
+    "roles.view",
+    "roles.create",
+    "roles.update",
+    "roles.delete",
+    "roles.assign",
+  ],
+  "config:write": ["tenant.settings.update", "ai.configuration.update"],
+  "config:read": ["tenant.settings.view", "ai.configuration.view"],
+  "document:write": ["documents.update", "documents.share", "folders.create", "folders.share", "folders.update"],
+  "document:delete": ["folders.delete"],
+};
+
+function expandPermissions(have: Iterable<string>): Set<string> {
+  const out = new Set(have);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const code of [...out]) {
+      for (const peer of EQUIVALENTS[code] || []) {
+        if (!out.has(peer)) {
+          out.add(peer);
+          changed = true;
+        }
+      }
+      for (const granted of GRANTS[code] || []) {
+        if (!out.has(granted)) {
+          out.add(granted);
+          changed = true;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 export function permissionCodes(user: AppUser | null | undefined): string[] {
   return user?.permissions || [];
 }
@@ -16,14 +77,22 @@ export function roleNames(user: AppUser | null | undefined): string[] {
     .filter(Boolean);
 }
 
-export function hasAnyPermission(user: AppUser | null | undefined, codes: string[]): boolean {
-  if (!user) return false;
-  const have = new Set(permissionCodes(user));
-  return codes.some((code) => have.has(code));
-}
-
 export function isSuperAdmin(user: AppUser | null | undefined): boolean {
   return Boolean(user?.is_super_admin);
+}
+
+export function hasPermission(user: AppUser | null | undefined, code: string): boolean {
+  if (!user) return false;
+  if (isSuperAdmin(user)) {
+    return PLATFORM_CODES.has(code) || code.startsWith("platform.");
+  }
+  const have = permissionCodes(user);
+  if (have.includes(code)) return true;
+  return expandPermissions(have).has(code);
+}
+
+export function hasAnyPermission(user: AppUser | null | undefined, codes: string[]): boolean {
+  return codes.some((code) => hasPermission(user, code));
 }
 
 export function navLinksFor(user: AppUser): NavLinkItem[] {
@@ -60,7 +129,7 @@ export function navLinksFor(user: AppUser): NavLinkItem[] {
   if (hasAnyPermission(user, ["audit.view", "audit:read"])) {
     links.push({ to: "/admin/audit", label: "Audit" });
   }
-  if (hasAnyPermission(user, ["config:read"])) {
+  if (hasAnyPermission(user, ["config:read", "tenant.settings.view"])) {
     links.push({ to: "/admin", label: "Settings" });
   }
   return links;
