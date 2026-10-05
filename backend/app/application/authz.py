@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import RequestContext
 from app.core.errors import NotFoundError, ValidationFailedError
+from app.core.permissions import TENANT_ADMIN_NAMES, TENANT_ADMIN_ROLE, is_tenant_admin
 from app.domain.types import VectorFilter
 
 _ACL_LIST_KEYS = (
@@ -19,6 +20,9 @@ _ACL_LIST_KEYS = (
     "denied_groups",
     "denied_roles",
 )
+
+# Seeded tenant roles that uploaders may grant via document ACL.
+UPLOAD_AUDIENCE_ROLES = frozenset({"Member", "Viewer", TENANT_ADMIN_ROLE, *TENANT_ADMIN_NAMES})
 
 
 def owner_acl(user_id: UUID | str) -> dict:
@@ -33,6 +37,63 @@ def owner_acl(user_id: UUID | str) -> dict:
         "denied_groups": [],
         "denied_roles": [],
     }
+
+
+def normalize_allowed_roles(roles: list[str] | None) -> list[str]:
+    """Map Admin → Tenant Admin; drop unknowns; preserve order."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in roles or []:
+        name = str(raw).strip()
+        if not name:
+            continue
+        if name in TENANT_ADMIN_NAMES:
+            name = TENANT_ADMIN_ROLE
+        if name not in UPLOAD_AUDIENCE_ROLES:
+            raise ValidationFailedError(
+                f"Unknown visibility role {raw!r}; use Member, Viewer, or Tenant Admin"
+            )
+        if name not in seen:
+            out.append(name)
+            seen.add(name)
+    return out
+
+
+def default_upload_acl(ctx: RequestContext) -> dict:
+    """Member uploads stay private; Tenant Admin uploads are tenant-wide by default."""
+    if ctx.user_id is None:
+        raise ValidationFailedError("Document owner is required")
+    acl = owner_acl(ctx.user_id)
+    if is_tenant_admin(ctx.role_names):
+        acl["visibility"] = "tenant"
+    return acl
+
+
+def resolve_upload_acl(
+    ctx: RequestContext,
+    *,
+    visibility: str | None = None,
+    allowed_roles: list[str] | None = None,
+) -> dict:
+    """Build ACL for a new upload. Omitted fields use role-based defaults."""
+    if ctx.user_id is None:
+        raise ValidationFailedError("Document owner is required")
+    if visibility is None and allowed_roles is None:
+        return default_upload_acl(ctx)
+    acl = owner_acl(ctx.user_id)
+    roles = normalize_allowed_roles(allowed_roles)
+    if visibility is not None:
+        vis = str(visibility).strip().lower()
+        if vis not in {"private", "tenant"}:
+            raise ValidationFailedError("visibility must be private or tenant")
+        acl["visibility"] = vis
+    elif roles:
+        acl["visibility"] = "private"
+    elif is_tenant_admin(ctx.role_names):
+        acl["visibility"] = "tenant"
+    if roles:
+        acl["allowed_roles"] = roles
+    return acl
 
 
 def _str_list(values: Any) -> list[str]:
@@ -139,15 +200,23 @@ def can_manage_source(source: Any, ctx: RequestContext) -> bool:
 
 
 def can_share_document(document: Any, ctx: RequestContext) -> bool:
-    if ctx.has("source:admin"):
-        return True
-    if not ctx.has("document:write"):
+    """Who may change a document's visibility or ACL.
+
+    Allowed: the owner (uploader), including a Member who uploaded it, or a
+    Tenant Admin of the same tenant. Read grants (allowed_users, allowed_roles,
+    tenant visibility) are not ownership. Another tenant is never allowed.
+    """
+    if ctx.user_id is None or ctx.tenant_id is None:
         return False
-    owner = getattr(document, "owner_user_id", None)
-    if owner is not None and ctx.user_id is not None and owner == ctx.user_id:
+    doc_tenant = getattr(document, "tenant_id", None)
+    if doc_tenant is None or str(doc_tenant) != str(ctx.tenant_id):
+        return False
+    if is_tenant_admin(ctx.role_names):
+        return True
+    if str(getattr(document, "owner_user_id", None) or "") == str(ctx.user_id):
         return True
     acl = getattr(document, "acl", None) or {}
-    return bool(ctx.user_id and str(acl.get("owner_id") or "") == str(ctx.user_id))
+    return str(acl.get("owner_id") or "") == str(ctx.user_id)
 
 
 def document_acl_sql(alias: str = "d") -> str:

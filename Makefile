@@ -1,4 +1,4 @@
-.PHONY: up down logs test test-unit test-ftest test-ui test-all migrate api frontend lint bootstrap desktop desktop-dist frontend-build start stop restart
+.PHONY: up down logs test test-unit test-ftest test-ui test-all migrate api frontend lint bootstrap frontend-build start stop restart
 
 COMPOSE = docker compose -f docker/docker-compose.yml
 PYTEST = PYTHONPATH=backend RAG_CONFIG_DIR=configs backend/.venv/bin/pytest
@@ -53,11 +53,3 @@ lint:
 
 frontend-build:
 	cd frontend && npm run build
-
-desktop: frontend-build
-	cd desktop && npm install
-	cd desktop && npm start
-
-desktop-dist: frontend-build
-	cd desktop && npm install
-	cd desktop && npm run dist

@@ -1,8 +1,12 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { adminApi, asList, chatApi } from "../api/client";
+import { hasAnyPermission, roleNames } from "../auth/access";
+import { useCurrentUser } from "../auth/CurrentUserContext";
 import { untrustedText } from "../security/untrusted";
 
 type Citation = {
+  document_id?: string;
   document_name?: string;
   page?: number;
   chunk_id?: string;
@@ -25,15 +29,30 @@ type Conversation = {
 const CONV_KEY = "active_conversation_id";
 
 export default function ChatPage() {
-  const [question, setQuestion] = useState("");
+  const user = useCurrentUser();
+  const navigate = useNavigate();
+  const canDelete = hasAnyPermission(user, ["conversation:delete"]);
+  const [question, setQuestion] = useState(() => new URLSearchParams(window.location.search).get("q") || "");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [conversationId, setConversationId] = useState<string | undefined>(
-    () => localStorage.getItem(CONV_KEY) || undefined,
-  );
+  const [conversationId, setConversationId] = useState<string | undefined>(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("fresh") === "1") {
+      localStorage.removeItem(CONV_KEY);
+      return undefined;
+    }
+    const fromUrl = params.get("c");
+    if (fromUrl) {
+      localStorage.setItem(CONV_KEY, fromUrl);
+      return fromUrl;
+    }
+    return localStorage.getItem(CONV_KEY) || undefined;
+  });
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [ollamaDown, setOllamaDown] = useState(false);
+  const [feedbackSaved, setFeedbackSaved] = useState<Record<string, string>>({});
+  const [feedbackError, setFeedbackError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const pendingRef = useRef(false);
 
@@ -62,6 +81,7 @@ export default function ChatPage() {
       .then((data) => {
         const rows = asList<Conversation>(data);
         setConversations(rows);
+        if (new URLSearchParams(window.location.search).get("fresh") === "1") return;
         const stored = localStorage.getItem(CONV_KEY);
         if (stored && rows.some((c) => c.id === stored)) {
           setConversationId(stored);
@@ -129,14 +149,13 @@ export default function ChatPage() {
     }
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    const text = question.trim();
+  async function send(text: string) {
     if (!text || pending) return;
     setError("");
     setPending(true);
     pendingRef.current = true;
     setQuestion("");
+    if (window.location.search) navigate({ pathname: "/", search: "" }, { replace: true });
     const tempId = `local-${Date.now()}`;
     setMessages((prev) => [...prev, { id: tempId, role: "user", content: text }]);
     const streamId = `stream-${Date.now()}`;
@@ -205,7 +224,28 @@ export default function ChatPage() {
     }
   }
 
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    send(question.trim());
+  }
+
+  async function rate(messageId: string, rating: "up" | "down") {
+    setFeedbackError("");
+    try {
+      await chatApi.feedback(messageId, rating);
+      setFeedbackSaved((prev) => ({ ...prev, [messageId]: rating }));
+    } catch (err) {
+      setFeedbackError(err instanceof Error ? err.message : "Could not save feedback. Try again.");
+    }
+  }
+
+  const prompts = [
+    { label: "What can I ask about?", text: "Which documents am I allowed to ask questions about?" },
+    { label: "Summarize what I can read", text: "Summarize the documents I am allowed to read." },
+  ];
+
   const active = conversations.find((c) => c.id === conversationId);
+  const role = roleNames(user)[0];
 
   return (
     <section className="flex min-h-[calc(100vh-8.5rem)] flex-1 flex-col overflow-hidden rounded-xl bg-surface-lowest shadow-card md:flex-row">
@@ -213,7 +253,7 @@ export default function ChatPage() {
         <div className="flex h-14 items-center justify-between bg-surface-low/40 px-4">
           <h1 className="text-headline-sm">Conversations</h1>
           <div className="flex items-center gap-1">
-            {conversations.length > 0 && (
+            {canDelete && conversations.length > 0 && (
               <button className="btn btn-ghost h-7 px-2 text-label-sm" type="button" onClick={clearAllConversations}>
                 Clear
               </button>
@@ -244,6 +284,7 @@ export default function ChatPage() {
               >
                 {untrustedText(c.title || "Untitled")}
               </button>
+              {canDelete && (
               <button
                 type="button"
                 aria-label={`Delete ${untrustedText(c.title || "conversation")}`}
@@ -256,6 +297,7 @@ export default function ChatPage() {
               >
                 <TrashIcon />
               </button>
+              )}
             </li>
           ))}
           {conversations.length === 0 && (
@@ -268,14 +310,17 @@ export default function ChatPage() {
         <div className="flex h-14 items-center justify-between bg-surface-lowest px-6 shadow-sm">
           <div className="min-w-0">
             <h2 className="truncate text-headline-sm">{untrustedText(active?.title || "New conversation")}</h2>
-            <p className="text-label-sm text-secondary">Answers are grounded in indexed documents for this workspace.</p>
+            <p className="text-label-sm text-secondary">
+              {role ? `${role}. ` : ""}Answers use only documents you are allowed to read.
+            </p>
             {ollamaDown && (
               <p className="mt-0.5 text-body-sm text-error">
-                Ollama is not running. Start it with `ollama serve` so answers can be generated.
+                Ollama is not running, so a new answer cannot be generated. Start it with `ollama serve`. Saved
+                conversations on the left still open.
               </p>
             )}
           </div>
-          {conversationId && (
+          {conversationId && canDelete && (
             <button
               className="inline-flex h-8 w-8 items-center justify-center rounded text-secondary hover:bg-surface-container"
               type="button"
@@ -289,16 +334,34 @@ export default function ChatPage() {
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-6">
           {messages.length === 0 && !pending && (
-            <div className="mx-auto mt-16 max-w-lg text-center text-on-variant">
-              <p className="text-headline-md text-on-surface">Ask about your documents</p>
-              <p className="mt-2 text-body-md">
+            <div className="mx-auto mt-10 max-w-lg text-center">
+              <p className="text-headline-md text-on-surface">Ask about documents you can read</p>
+              <p className="mt-2 text-body-md text-on-variant">
                 Follow-ups stay in this thread. Start a new chat from the left for a fresh context.
               </p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {prompts.map((prompt) => (
+                  <button
+                    key={prompt.label}
+                    className="btn btn-secondary"
+                    type="button"
+                    disabled={pending}
+                    onClick={() => send(prompt.text)}
+                  >
+                    {prompt.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           <div className="mx-auto flex max-w-3xl flex-col gap-6">
             {messages.map((m) => (
-              <MessageBubble key={m.id} message={m} />
+              <MessageBubble
+                key={m.id}
+                message={m}
+                savedRating={feedbackSaved[m.id]}
+                onRate={rate}
+              />
             ))}
             {pending && !(messages.at(-1)?.role === "assistant" && messages.at(-1)?.content) && (
               <div className="max-w-[92%] rounded-2xl rounded-tl-sm bg-surface-lowest px-5 py-4 text-body-lg text-on-variant shadow-sm">
@@ -308,7 +371,12 @@ export default function ChatPage() {
             <div ref={bottomRef} />
           </div>
         </div>
-        {error && <p className="px-6 pb-2 text-body-sm text-error">{error}</p>}
+        {error && (
+          <p className="px-6 pb-2 text-body-sm text-error">
+            {error} Check that the API is running, then ask again.
+          </p>
+        )}
+        {feedbackError && <p className="px-6 pb-2 text-body-sm text-error">{feedbackError}</p>}
         <form className="border-t border-outline-variant/30 bg-surface-lowest p-4" onSubmit={onSubmit}>
           <div className="mx-auto flex max-w-3xl gap-2">
             <input
@@ -317,8 +385,8 @@ export default function ChatPage() {
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
             />
-            <button className="btn btn-primary h-11 rounded-xl px-4" type="submit" disabled={pending}>
-              Ask
+            <button className="btn btn-primary h-11 rounded-xl px-4" type="submit" disabled={pending || !question.trim()}>
+              {pending ? "Asking…" : "Ask"}
             </button>
           </div>
           <p className="mx-auto mt-2 max-w-3xl text-label-sm text-on-variant">
@@ -341,8 +409,17 @@ function TrashIcon() {
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({
+  message,
+  savedRating,
+  onRate,
+}: {
+  message: ChatMessage;
+  savedRating?: string;
+  onRate: (id: string, rating: "up" | "down") => void;
+}) {
   const mine = message.role === "user";
+  const canRate = !mine && message.id && !message.id.startsWith("local-") && !message.id.startsWith("stream-");
   return (
     <div className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
       {!mine && (
@@ -364,22 +441,51 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {!mine && message.citations && message.citations.length > 0 && (
           <div className="rounded-lg bg-surface-low/60 p-3">
             <p className="text-label-sm font-semibold uppercase tracking-wider text-secondary">
-              Sources cited ({message.citations.length} verified chunks)
+              Sources you can read ({message.citations.length})
             </p>
-            <ul className="mt-2 flex flex-wrap gap-2">
+            <ul className="mt-2 flex flex-col gap-2">
               {message.citations.map((c, i) => (
                 <li
                   key={c.chunk_id || i}
-                  className="inline-flex items-center gap-1.5 rounded bg-surface-lowest px-2.5 py-1.5 font-mono text-code-sm text-on-surface shadow-sm"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded bg-surface-lowest px-2.5 py-1.5 text-body-sm text-on-surface shadow-sm"
                 >
-                  <span className="font-medium">
-                    [{i + 1}] {untrustedText(c.document_name)}
+                  <span>
+                    <span className="font-medium">
+                      [{i + 1}] {untrustedText(c.document_name)}
+                    </span>
+                    {c.page != null ? <span className="text-secondary"> · p. {c.page}</span> : null}
+                    {c.section ? <span className="text-secondary"> · {untrustedText(c.section)}</span> : null}
                   </span>
-                  {c.page != null ? <span className="text-secondary">· p. {c.page}</span> : null}
-                  {c.section ? <span className="text-secondary">· {untrustedText(c.section)}</span> : null}
+                  {c.document_id && (
+                    <Link className="link-action" to={`/documents?focus=${encodeURIComponent(c.document_id)}`}>
+                      Open source
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+        {!mine && message.content && (!message.citations || message.citations.length === 0) && (
+          <p className="text-body-sm text-on-variant">No document you can read was cited for this answer.</p>
+        )}
+        {canRate && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className={`btn h-8 ${savedRating === "up" ? "btn-primary" : "btn-secondary"}`}
+              type="button"
+              onClick={() => onRate(message.id, "up")}
+            >
+              Helpful
+            </button>
+            <button
+              className={`btn h-8 ${savedRating === "down" ? "btn-primary" : "btn-ghost"}`}
+              type="button"
+              onClick={() => onRate(message.id, "down")}
+            >
+              Not helpful
+            </button>
+            {savedRating && <span className="text-body-sm text-on-variant">Saved with this answer.</span>}
           </div>
         )}
       </div>

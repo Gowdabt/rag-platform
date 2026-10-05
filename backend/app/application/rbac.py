@@ -51,6 +51,10 @@ NEW_PERMISSIONS = (
 
 ALL_PERMISSIONS = OLD_PERMISSIONS + NEW_PERMISSIONS
 
+# Tenant Admin follows document ACLs by default (no automatic private-doc bypass).
+# document:read_all remains in the catalog for explicit break-glass grants.
+TENANT_ADMIN_PERMISSIONS = tuple(code for code in ALL_PERMISSIONS if code != "document:read_all")
+
 PERMISSION_DESCRIPTIONS: dict[str, str] = {
     "document:read": "Read documents and retrieved chunks",
     "document:read_all": "Read all documents in the tenant regardless of ACL",
@@ -97,7 +101,7 @@ PERMISSION_DESCRIPTIONS: dict[str, str] = {
 
 # The only system tenant role. Platform super_admin is users.is_super_admin, not a tenant role.
 SYSTEM_ROLES: dict[str, tuple[str, ...]] = {
-    TENANT_ADMIN_ROLE: ALL_PERMISSIONS,
+    TENANT_ADMIN_ROLE: TENANT_ADMIN_PERMISSIONS,
 }
 
 # Non-system defaults so existing Member invites keep working. Not is_system.

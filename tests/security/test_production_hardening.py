@@ -67,8 +67,6 @@ def test_health_live_ready_and_security_headers():
         assert acao != "*"
         allowed = client.get("/api/v1/health/live", headers={"Origin": "http://localhost:5173"})
         assert allowed.headers.get("access-control-allow-origin") == "http://localhost:5173"
-        electron = client.get("/api/v1/health/live", headers={"Origin": "http://127.0.0.1:17800"})
-        assert electron.headers.get("access-control-allow-origin") == "http://127.0.0.1:17800"
 
 
 def test_production_runtime_safety(monkeypatch):

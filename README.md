@@ -44,7 +44,7 @@ OAuth client IDs/secrets belong in `.env` (never commit them). Redirect URI must
 
 ## Architecture
 
-**Modular monolith:** one FastAPI process (auth, documents, connectors, chat, eval, admin). Ingestion jobs run in-process when `queue.provider=asyncio`. Vite UI is a separate process. Optional Electron desktop wrapper.
+**Modular monolith:** one FastAPI process (auth, documents, connectors, chat, eval, admin). Ingestion jobs run in-process when `queue.provider=asyncio`. The UI is the Vite web app.
 
 ```
 backend/app/
@@ -108,15 +108,13 @@ Run API and UI from the repo root:
 ./scripts/restart.sh  # stop then start
 ```
 
-Same targets: `make start`, `make stop`, `make restart`. PIDs and logs go in `.run/` (gitignored). Sources `.env` if present, uses `backend/.venv`, and sets `RAG_CONFIG_DIR` to `configs/`. Ingestion jobs run in the API process locally (no separate worker). Electron is not started.
+Same targets: `make start`, `make stop`, `make restart`. PIDs and logs go in `.run/` (gitignored). Sources `.env` if present, uses `backend/.venv`, and sets `RAG_CONFIG_DIR` to `configs/`. Ingestion jobs run in the API process locally (no separate worker). Access is web only.
 
 Foreground alternative (two terminals): `make api` then `make frontend` (after `cd frontend && npm install`).
 
 **Super Admin env vars** (set in `.env`, never commit): `PLATFORM_SUPERADMIN_EMAIL`, `PLATFORM_SUPERADMIN_PASSWORD`. The user is seeded when the API starts.
 
 Frontend: `cd frontend && npm install` then `make frontend`.
-
-Desktop (optional): `make desktop` (Postgres must already be running).
 
 Docker is optional: `docker compose -f docker/docker-compose.yml up postgres -d` then `make migrate`.
 

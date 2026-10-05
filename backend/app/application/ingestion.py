@@ -30,6 +30,7 @@ from app.application.authz import (
     merge_acl,
     owner_acl,
     resolve_share_user_ids,
+    resolve_upload_acl,
 )
 from app.application.authz_epoch import persist_authz_bump
 from app.application.content_address import pipeline_fingerprint
@@ -204,6 +205,8 @@ class IngestionService:
         mime_type: str,
         workspace_id: UUID | None = None,
         acl: dict | None = None,
+        visibility: str | None = None,
+        allowed_roles: list[str] | None = None,
     ) -> dict:
         if not self.ctx.has("document:write"):
             raise ForbiddenError("Missing permission document:write")
@@ -214,6 +217,9 @@ class IngestionService:
             raise ValidationFailedError("workspace_id is required")
         await assert_workspace_access(self.session, self.ctx, workspace_id)
         source = await self._uploads_source(workspace_id)
+        effective_acl = acl if acl is not None else resolve_upload_acl(
+            self.ctx, visibility=visibility, allowed_roles=allowed_roles
+        )
         return await self.ingest_content(
             source=source,
             source_file_id=filename,
@@ -222,7 +228,7 @@ class IngestionService:
             mime_type=mime_type,
             workspace_id=workspace_id,
             path=filename,
-            acl=acl,
+            acl=effective_acl,
         )
 
     def _mark_unchanged(self, document: Document, last: DocumentVersion, *, path: str | None, filename: str, revision: str | None) -> dict:
@@ -408,18 +414,26 @@ class IngestionService:
         if version.derived_from_version_id:
             job.status = "completed"
             return
+        # Capture scalars before begin_nested: a failed nested txn expires ORM state.
+        attempts = job.attempts
+        version_id = version.id
+        storage_key = version.storage_key
+        mime_type = version.mime_type
+        doc_path = document.path
+        doc_id = document.id
+        workspace_id = document.workspace_id
         try:
             async with self.session.begin_nested():
                 store = self._store()
-                content = await store.get(version.storage_key)
+                content = await store.get(storage_key)
                 job.status = "parsing"
-                parsed = await self._parser().parse(content, mime_type=version.mime_type, filename=document.path)
+                parsed = await self._parser().parse(content, mime_type=mime_type, filename=doc_path)
                 version.extra_metadata = parsed.metadata
                 version.parser_provider = self.settings.parser.provider
                 version.parser_version = "1"
                 job.status = "chunking"
                 chunks = await self._chunker().chunk(
-                    parsed, document_id=document.id, document_version_id=version.id
+                    parsed, document_id=doc_id, document_version_id=version_id
                 )
                 version.chunker_strategy = self.settings.chunking.strategy
                 version.chunker_version = "1"
@@ -433,8 +447,8 @@ class IngestionService:
                 for i, chunk in enumerate(chunks):
                     row = DocumentChunk(
                         tenant_id=self.ctx.tenant_id,
-                        document_id=document.id,
-                        version_id=version.id,
+                        document_id=doc_id,
+                        version_id=version_id,
                         chunk_index=chunk.chunk_index,
                         text=chunk.text,
                         page=chunk.page,
@@ -448,9 +462,9 @@ class IngestionService:
                         records.append(
                             VectorRecord(
                                 chunk_id=row.id,
-                                document_id=document.id,
-                                version_id=version.id,
-                                workspace_id=document.workspace_id,
+                                document_id=doc_id,
+                                version_id=version_id,
+                                workspace_id=workspace_id,
                                 tenant_id=self.ctx.require_tenant(),
                                 embedding=result.vectors[i],
                                 payload={"embedding_profile_id": str(profile.id)},
@@ -462,10 +476,12 @@ class IngestionService:
                 job.status = "completed"
                 await self._stamp_derived(version, "completed")
         except Exception as exc:
-            job.status = "failed" if job.attempts < 3 else "dead_letter"
+            await self.session.refresh(job)
+            await self.session.refresh(version)
+            job.status = "failed" if attempts < 3 else "dead_letter"
             job.error = str(exc)
             await self.session.execute(
-                update(DocumentVersion).where(DocumentVersion.id == version.id).values(status="failed")
+                update(DocumentVersion).where(DocumentVersion.id == version_id).values(status="failed")
             )
             await self._stamp_derived(version, "failed")
 
@@ -508,6 +524,8 @@ class IngestionService:
                     "classification": d.classification,
                     "active_version_id": str(d.active_version_id) if d.active_version_id else None,
                     "workspace_id": str(d.workspace_id),
+                    "owner_user_id": str(d.owner_user_id) if d.owner_user_id else None,
+                    "acl": d.acl or {},
                     "status": version.status if version else "pending",
                     "version_number": version.version_number if version else None,
                     "size_bytes": version.size_bytes if version else None,
@@ -640,6 +658,10 @@ class IngestionService:
         if document is None or document.tenant_id != self.ctx.tenant_id:
             raise NotFoundError("Document not found")
         if not can_share_document(document, self.ctx):
+            # 403 only when the caller can already read the document. Otherwise
+            # 404 so a guess at another user's private id does not confirm it exists.
+            if can_read_document(document.acl or {}, self.ctx):
+                raise ForbiddenError("Only the document owner or a tenant admin can change visibility")
             raise NotFoundError("Document not found")
         owner_id = document.owner_user_id or self.ctx.user_id
         if owner_id is None:
@@ -656,10 +678,15 @@ class IngestionService:
             user_ids=patch.get("denied_users"),
             emails=patch.get("denied_emails"),
         )
+        allowed_roles = patch.get("allowed_roles")
+        if allowed_roles is not None:
+            from app.application.authz import normalize_allowed_roles
+
+            allowed_roles = normalize_allowed_roles(allowed_roles)
         fields = {
             "allowed_users": allowed_users if (patch.get("allowed_users") is not None or patch.get("emails") is not None) else None,
             "denied_users": denied_users if (patch.get("denied_users") is not None or patch.get("denied_emails") is not None) else None,
-            "allowed_roles": patch.get("allowed_roles"),
+            "allowed_roles": allowed_roles,
             "allowed_groups": patch.get("allowed_groups"),
             "denied_roles": patch.get("denied_roles"),
             "denied_groups": patch.get("denied_groups"),

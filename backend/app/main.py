@@ -79,7 +79,7 @@ def create_app() -> FastAPI:
         "allow_headers": ["Authorization", "Content-Type", "Accept"],
     }
     if environment != "production":
-        # Vite/Electron loopback on any port (not `*` — credentials are enabled).
+        # Vite loopback on any port (not `*` — credentials are enabled).
         cors_kwargs["allow_origin_regex"] = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
     application.add_middleware(RateLimitMiddleware, limit=180, window_seconds=60)
     application.add_middleware(RequestIdMiddleware)

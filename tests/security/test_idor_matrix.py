@@ -3,8 +3,32 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from app.adapters.providers.embeddings.hashing import HashingEmbedding
+from app.application.ingestion import IngestionService
 from app.main import create_app
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _local_providers(monkeypatch):
+    """Keep ACL/IDOR coverage offline (no Ollama)."""
+    from app.adapters.providers.llm.extractive import ExtractiveLLM
+    from app.application.factory import ProviderFactory
+
+    def _embedder(self):
+        return HashingEmbedding(self.settings.embedding, self.ctx)
+
+    original = ProviderFactory.create
+
+    def create(self, kind, name=None, **kwargs):
+        if kind == "embedding":
+            return HashingEmbedding(kwargs.get("config") or self.settings.embedding, kwargs.get("ctx") or self.ctx)
+        if kind == "llm":
+            return ExtractiveLLM(kwargs.get("config") or self.settings.llm, kwargs.get("ctx") or self.ctx)
+        return original(self, kind, name, **kwargs)
+
+    monkeypatch.setattr(IngestionService, "_embedder", _embedder)
+    monkeypatch.setattr(ProviderFactory, "create", create)
 
 
 def _signup(client: TestClient, *, prefix: str):
@@ -43,13 +67,19 @@ def test_acl_and_idor_matrix_for_core_resources():
         _member_email, member, _user_id = _invite_member(client, owner, tenant_id)
         _other_email, other, _ = _signup(client, prefix="idor-x")
 
+        # Signup owner is Tenant Admin; default admin uploads are tenant-wide — force private for ACL IDOR.
         uploaded = client.post(
             "/api/v1/documents",
             headers=owner,
             files={"file": ("private.md", b"# Owner only\nPRIVATE-DOC-TEXT\n", "text/markdown")},
+            data={"visibility": "private"},
         )
         assert uploaded.status_code == 200, uploaded.text
         doc_id = uploaded.json()["document_id"]
+        owner_docs = client.get("/api/v1/documents", headers=owner)
+        assert owner_docs.status_code == 200
+        acl_row = next(row for row in owner_docs.json() if row["id"] == doc_id)
+        assert acl_row["acl"]["visibility"] == "private"
 
         folder = client.post("/api/v1/folders", headers=owner, json={"name": "Private"})
         assert folder.status_code == 200, folder.text

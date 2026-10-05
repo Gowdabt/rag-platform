@@ -6,7 +6,7 @@ function resolveApiBase(): string {
     // to IPv6 ::1 on macOS and fail with TypeError "Failed to fetch".
     return "http://127.0.0.1:8000";
   }
-  // Production / Electron: same-origin (FastAPI SPA on :8000 or :17800).
+  // Production: same-origin when the API serves the built web app.
   return "";
 }
 
@@ -162,15 +162,25 @@ export const auth = {
     api("/api/v1/auth/accept-invite", { method: "POST", body: JSON.stringify({ token, password }) }),
 };
 
+export type DocumentUploadOptions = {
+  workspaceId?: string;
+  visibility?: "private" | "tenant";
+  allowedRoles?: string[];
+};
+
 export const docs = {
   list: () => api("/api/v1/documents"),
   versions: (id: string) => api(`/api/v1/documents/${id}/versions`),
   share: (id: string, body: Record<string, unknown>) =>
     api(`/api/v1/documents/${id}/acl`, { method: "POST", body: JSON.stringify(body) }),
-  upload: async (file: File, workspaceId?: string) => {
+  upload: async (file: File, options?: DocumentUploadOptions | string) => {
+    const opts: DocumentUploadOptions =
+      typeof options === "string" ? { workspaceId: options } : options || {};
     const body = new FormData();
     body.append("file", file);
-    if (workspaceId) body.append("workspace_id", workspaceId);
+    if (opts.workspaceId) body.append("workspace_id", opts.workspaceId);
+    if (opts.visibility) body.append("visibility", opts.visibility);
+    if (opts.allowedRoles) body.append("allowed_roles", JSON.stringify(opts.allowedRoles));
     return api("/api/v1/documents", { method: "POST", body });
   },
 };

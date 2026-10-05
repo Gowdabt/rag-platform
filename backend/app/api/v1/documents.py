@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Literal
 from uuid import UUID
 
@@ -14,6 +15,7 @@ from app.api.deps import get_context, get_tenant_settings, require_permission
 from app.application.ingestion import IngestionService
 from app.config.models import PlatformSettings
 from app.core.context import RequestContext
+from app.core.errors import ValidationFailedError
 
 router = APIRouter(prefix="/api/v1", tags=["documents"])
 
@@ -30,6 +32,23 @@ class DocumentAclIn(BaseModel):
     visibility: Literal["private", "tenant"] | None = None
 
 
+def _parse_allowed_roles_form(raw: str | None) -> list[str] | None:
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValidationFailedError("allowed_roles must be a JSON array or comma-separated roles") from exc
+        if not isinstance(parsed, list):
+            raise ValidationFailedError("allowed_roles must be a JSON array or comma-separated roles")
+        return [str(item) for item in parsed]
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
 async def _db(ctx: RequestContext = Depends(get_context)) -> AsyncSession:
     factory = session_factory()
     async with factory() as session:
@@ -43,6 +62,8 @@ async def upload_document(
     background: BackgroundTasks,
     file: UploadFile = File(...),
     workspace_id: UUID | None = Form(default=None),
+    visibility: Literal["private", "tenant"] | None = Form(default=None),
+    allowed_roles: str | None = Form(default=None),
     ctx: RequestContext = Depends(require_permission("document:write")),
     settings: PlatformSettings = Depends(get_tenant_settings),
     session: AsyncSession = Depends(_db),
@@ -54,6 +75,8 @@ async def upload_document(
         content=content,
         mime_type=file.content_type or "application/octet-stream",
         workspace_id=workspace_id,
+        visibility=visibility,
+        allowed_roles=_parse_allowed_roles_form(allowed_roles),
     )
     # BackgroundTasks ran before this request's transaction committed, so the worker
     # never saw the job. Process in-process queues in the same session.

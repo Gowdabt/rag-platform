@@ -53,14 +53,13 @@ var/
 *.sqlite3
 *.db
 
-# Node / frontend / desktop
+# Node / frontend
 node_modules/
 dist/
 build/
 frontend/dist/
 frontend/.vite/
 .vite/
-desktop/release/
 *.tsbuildinfo
 
 # OS / IDE (keep .cursor/rules; never commit MCP keys)

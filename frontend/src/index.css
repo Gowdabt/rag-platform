@@ -330,12 +330,11 @@
   .status-dot {
     @apply inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-success;
   }
-}
 
-.desktop-drag {
-  -webkit-app-region: drag;
-}
-
-.desktop-no-drag {
-  -webkit-app-region: no-drag;
+  .btn:focus-visible,
+  .input-field:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--color-on-surface);
+    outline-offset: 2px;
+  }
 }

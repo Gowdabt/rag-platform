@@ -105,6 +105,9 @@ export function navLinksFor(user: AppUser): NavLinkItem[] {
     ];
   }
   const links: NavLinkItem[] = [];
+  if (hasAnyPermission(user, ["ai.chat", "document:read", "conversation:read", "document:write"])) {
+    links.push({ to: "/home", label: "Home", end: true });
+  }
   if (hasAnyPermission(user, ["ai.chat", "document:read", "conversation:read"])) {
     links.push({ to: "/", label: "Chat", end: true });
   }

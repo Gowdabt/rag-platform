@@ -3,6 +3,7 @@ from uuid import uuid4
 from app.application.authz import (
     can_manage_source,
     can_read_document,
+    can_share_document,
     document_acl_sql,
     inherit_acl,
     merge_acl,
@@ -150,8 +151,68 @@ def test_document_acl_sql_matches_python_semantics():
     assert "{}'::jsonb" in sql
 
 
+class _Doc:
+    def __init__(self, tenant_id, owner_user_id, acl):
+        self.tenant_id = tenant_id
+        self.owner_user_id = owner_user_id
+        self.acl = acl
+
+
+def test_granted_reader_cannot_change_visibility_owner_and_tenant_admin_can():
+    tenant = uuid4()
+    other_tenant = uuid4()
+    owner = uuid4()
+    member = uuid4()
+    admin = uuid4()
+    acl = owner_acl(owner)
+    acl["allowed_users"].append(str(member))
+    acl["allowed_roles"] = ["Member"]
+    doc = _Doc(tenant, owner, acl)
+
+    member_ctx = _ctx(
+        user_id=member,
+        tenant_id=tenant,
+        role_names=("Member",),
+        permissions=frozenset({"document:read", "document:write"}),
+    )
+    owner_ctx = _ctx(
+        user_id=owner,
+        tenant_id=tenant,
+        role_names=("Member",),
+        permissions=frozenset({"document:read", "document:write"}),
+    )
+    admin_ctx = _ctx(
+        user_id=admin,
+        tenant_id=tenant,
+        role_names=("Tenant Admin",),
+        permissions=frozenset({"document:read", "document:write", "source:admin"}),
+    )
+    viewer_ctx = _ctx(user_id=uuid4(), tenant_id=tenant, role_names=("Viewer",), permissions=frozenset({"document:read"}))
+    other_admin = _ctx(
+        user_id=uuid4(),
+        tenant_id=other_tenant,
+        role_names=("Tenant Admin",),
+        permissions=frozenset({"document:read", "document:write", "source:admin"}),
+    )
+
+    assert can_read_document(acl, member_ctx)
+    assert not can_share_document(doc, member_ctx)
+    assert can_share_document(doc, owner_ctx)
+    assert can_share_document(doc, admin_ctx)
+    assert can_read_document({**acl, "visibility": "tenant"}, viewer_ctx)
+    assert not can_share_document(doc, viewer_ctx)
+    assert not can_share_document(doc, other_admin)
+    # Tenant Admin may change ACL without receiving document:read_all.
+    assert not admin_ctx.has("document:read_all")
+    private_member = owner_acl(member)
+    private_doc = _Doc(tenant, member, private_member)
+    assert not can_read_document(private_member, admin_ctx)
+    assert can_share_document(private_doc, admin_ctx)
+
+
 def test_admin_only_permissions_are_not_on_member():
-    assert "document:read_all" in SYSTEM_ROLES["Tenant Admin"]
+    # Tenant Admin follows document ACLs; document:read_all is break-glass only.
+    assert "document:read_all" not in SYSTEM_ROLES["Tenant Admin"]
     assert "source:admin" in SYSTEM_ROLES["Tenant Admin"]
     from app.application.rbac import DEFAULT_ROLES
 

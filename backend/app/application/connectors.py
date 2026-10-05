@@ -164,8 +164,6 @@ class ConnectorService:
                 "http://localhost:5173/sources",
                 "http://127.0.0.1:8000/sources",
                 "http://localhost:8000/sources",
-                "http://127.0.0.1:17800/sources",
-                "http://localhost:17800/sources",
             ],
         }
 

@@ -129,5 +129,8 @@ def test_frontend_data_tables_use_fixed_grid_tracks():
     tenants = (root / "pages" / "TenantsPage.tsx").read_text(encoding="utf-8")
     assert "<span>Actions</span>" in tenants
     docs = (root / "pages" / "DocumentsPage.tsx").read_text(encoding="utf-8")
-    assert "data-head cols-5" in docs
-    assert "data-row cols-5" in docs
+    assert "data-head cols-6" in docs
+    assert "data-row cols-6" in docs
+    assert "upload-visibility" in docs
+    assert "Everyone in this tenant" in docs
+    assert "canEditDocumentVisibility" in docs

@@ -55,6 +55,17 @@ def test_authz_epoch_migration_persists_cross_worker_version():
     assert "users ADD COLUMN" in upgrade
 
 
+def test_document_visibility_migration_revokes_admin_read_all():
+    root = Path(__file__).resolve().parents[2]
+    migration = root / "backend/alembic/versions/009_document_visibility_defaults.py"
+    text = migration.read_text(encoding="utf-8")
+    upgrade, _, _downgrade = text.partition("def downgrade")
+    assert 'down_revision = "008_authz_epoch"' in text
+    assert "document:read_all" in upgrade
+    assert "visibility" in upgrade
+    assert "authz_epoch" in upgrade
+
+
 def test_content_address_migration_is_tenant_scoped():
     root = Path(__file__).resolve().parents[2]
     migration = root / "backend/alembic/versions/004_content_address.py"
